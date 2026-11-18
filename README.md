@@ -1,11 +1,39 @@
 # Python Clipping Automation Farm
 
-Turns long gaming videos and streams into ready-to-post vertical clips (Instagram Reels,
-YouTube Shorts): download → transcript → best moments → professional edit → hooks, captions,
-hashtags → (soon) Google Sheets control panel, scheduling and official-API posting.
+**An autonomous short-form video studio for gaming content.** Paste a gameplay or stream link into a Google
+Sheet and the farm downloads it, finds the moments worth watching, edits vertical clips with captions,
+hooks and an AI narrator, writes titles and hashtags, and publishes them to **YouTube Shorts** and
+**Instagram Reels** on a schedule through the official APIs, then measures the results and learns from them.
+It runs 24/7 on one Windows PC, starts with Windows, and needs no human between "paste link" and "posted".
 
-Runs fully on Python + FFmpeg + open-source models. AI text uses OpenAI (or Gemini) if you
-add a key; with no key it still works in offline mode. **No Claude needed at runtime.**
+### What it does
+- **Moment picking:** Whisper transcript + loudness / chat-spike signals + an LLM editor that scores standalone moments
+- **Editing:** 9:16 smart crop (face tracking for streamer layouts), cold open, punch-ins, colour grade, animated captions, music ducking, two-pass -14 LUFS loudness, quality check
+- **AI narrator:** a free local voice (Kokoro) adds a spoken intro and an on-screen closing comment, so each clip adds original commentary
+- **Packaging:** scroll-stopping first words, titles checked against real top-performing Shorts, 3-5 relevant hashtags, any game detected automatically
+- **Publishing:** YouTube Data API + Instagram Graph API, posting slots, missed-slot recovery, never posts the same clip twice, optional manual approval
+- **Growth loop:** views of every post, winners → rules the AI follows, daily trends finder (outliers vs. channel median), weekly audit with ONE fix
+- **Control panel:** Google Sheets (paste links, approve, see the schedule, performance and trends)
+- **Ops:** Windows Task Scheduler autostart + wake-to-post, supervisor with auto-restart, single-instance lock, 11 test suites, secret-scanning pre-commit hook
+
+**Stack:** Python 3.13, FFmpeg, OpenCV, faster-whisper, yt-dlp, kokoro-onnx, OpenAI (gpt-5-mini) or Gemini, gspread, Google / Meta official APIs, SQLite.
+
+### How it was built
+Designed, specified, tested and operated by **Ayush** ([@realayushsahu-ux](https://github.com/realayushsahu-ux)):
+product idea, the phase-by-phase roadmap, every rule the clips must follow, the account setups (Google Cloud,
+YouTube, Meta/Instagram), live testing on real channels and the decisions after each result. The code was
+written in pair-programming with **Claude (Anthropic)** as the AI engineer, which is why commits carry a
+`Co-Authored-By: Claude` line. At runtime the farm does **not** use Claude.
+
+### Responsible use
+Clip only content you own or have permission to use (your own gameplay is best), credit creators, use
+licensed music only, and follow YouTube's and Instagram's policies. The farm posts only through the
+official APIs and never claims views or virality it does not have. You are responsible for what you publish.
+
+### Licence
+MIT, see [LICENSE](LICENSE). Third-party parts keep their own licences (`growth/yt_skills/LICENSE`, `assets/LICENSES.md`).
+
+---
 
 ## Quick start (Windows)
 
@@ -45,7 +73,7 @@ More: [docs/SETUP.md](docs/SETUP.md) (how to run and test) · [docs/DESIGN.md](d
 | 6 | Posting: YouTube Shorts + Instagram Reels, official APIs, once-only, retries (`posting/`, docs/POSTING_SETUP.md) | ✅ live: first clip posted on both 2026-11-18 |
 | 7 | Runs by itself: auto-start with Windows, wakes the PC for post times, restarts after a crash (`core/service.py`, docs/RUNNING.md) | ✅ live |
 | 8 | Growth: views of every post, winners → AI learns their patterns (`growth/analytics.py`, `growth/learn.py`, Sheet tab Performance, `main.py stats`); trends finder: Shorts that beat their own channel's median + fresh GTA 6 streams to clip (`growth/trends.py`, Sheet tab Trends, `main.py trends`); weekly channel audit: the ONE fix for the week from measured facts (`growth/channel_audit.py`, Sheet tab Audit, `main.py audit`) ; AI voice commentary on every clip (free local Kokoro voice, `editor/voiceover.py`), GTA-6-only + title/hashtag rules from our first posts (`docs/YOUTUBE_LESSONS.md`) | ✅ parts 1-3 live; comments, planner next |
-| 9 | Private GitHub backup (`realayushsahu-ux/python-clipping-automation-farm`); `.env`, `secrets/`, data, videos, models never committed; pre-commit guard `scripts/check_secrets.py` blocks any key/token/ID | ✅ live |
+| 9 | GitHub repo; `.env`, `secrets/`, data, videos, models never committed; pre-commit guard `scripts/check_secrets.py` blocks any key/token/ID | ✅ live |
 
 ## GitHub (private) and secrets
 - Keys, tokens and IDs live only in `.env` and `secrets/` (both git-ignored). `.env.example` shows the names.

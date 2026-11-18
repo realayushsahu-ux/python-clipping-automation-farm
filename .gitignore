@@ -59,3 +59,7 @@ desktop.ini
 *.db-*
 *.log
 *.sqlite
+
+# generated at runtime from your own stats / trends (personal data, not code)
+config/winners.md
+config/trends.md

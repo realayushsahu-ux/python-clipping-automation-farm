@@ -1,6 +1,6 @@
 # YouTube: why 5 of our first 6 Shorts got under 6 views, and what the farm does now
 
-Checked 2026-11-18 with the YouTube Data API on all 6 uploads of GenzoGame (channel created 2026-11-16).
+Checked 2026-11-18 with the YouTube Data API on all 6 uploads of our test channel (2 days old at the time).
 
 | Short | Views | What was wrong |
 |---|---|---|
@@ -37,7 +37,7 @@ Checked 2026-11-18 with the YouTube Data API on all 6 uploads of GenzoGame (chan
 ## What you do (5 minutes, YouTube Studio → Customization)
 - Channel description: one line, e.g. "GTA 6 moments from the biggest streams, every day." + 2-3 keywords.
 - Banner + profile picture that say GTA 6.
-- A readable handle (now @genzogame-t6r), e.g. @GenzoGTA6, if free.
+- A short, readable handle that says what the channel is about (not the auto-generated one).
 - For uploads you do by hand: copy the title + hashtags from the Sheet (Ready to Post), category **Gaming**,
   language **English**.
 
