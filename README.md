@@ -45,6 +45,15 @@ More: [docs/SETUP.md](docs/SETUP.md) (how to run and test) · [docs/DESIGN.md](d
 | 6 | Posting: YouTube Shorts + Instagram Reels, official APIs, once-only, retries (`posting/`, docs/POSTING_SETUP.md) | ✅ live: first clip posted on both 2026-11-18 |
 | 7 | Runs by itself: auto-start with Windows, wakes the PC for post times, restarts after a crash (`core/service.py`, docs/RUNNING.md) | ✅ live |
 | 8 | Growth: views of every post, winners → AI learns their patterns (`growth/analytics.py`, `growth/learn.py`, Sheet tab Performance, `main.py stats`); trends finder: Shorts that beat their own channel's median + fresh GTA 6 streams to clip (`growth/trends.py`, Sheet tab Trends, `main.py trends`); weekly channel audit: the ONE fix for the week from measured facts (`growth/channel_audit.py`, Sheet tab Audit, `main.py audit`) ; AI voice commentary on every clip (free local Kokoro voice, `editor/voiceover.py`), GTA-6-only + title/hashtag rules from our first posts (`docs/YOUTUBE_LESSONS.md`) | ✅ parts 1-3 live; comments, planner next |
+| 9 | Private GitHub backup (`realayushsahu-ux/python-clipping-automation-farm`); `.env`, `secrets/`, data, videos, models never committed; pre-commit guard `scripts/check_secrets.py` blocks any key/token/ID | ✅ live |
+
+## GitHub (private) and secrets
+- Keys, tokens and IDs live only in `.env` and `secrets/` (both git-ignored). `.env.example` shows the names.
+- Every commit runs `scripts/check_secrets.py`: it blocks the commit if a real value from `.env` / `secrets/`
+  or a key shape (sk-..., AIza..., EAA..., private key) is in a staged file.
+- After cloning on a new PC, switch the guard on once:  `git config core.hooksPath .githooks`
+- Check everything by hand:  `.venv\Scripts\python.exe scripts\check_secrets.py --all`
+- Commits use your GitHub noreply e-mail (set for this repo), so your private e-mail stays hidden.
 
 ## Useful commands
 
