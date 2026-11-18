@@ -1,0 +1,28 @@
+# Python Clipping Automation Farm - dependencies (Python 3.10 - 3.13)
+# Install:  scripts\setup.ps1   (creates .venv on this drive and installs these)
+
+# --- download + media ---
+yt-dlp[default]>=2026.10.26      # YouTube/Twitch/Kick downloads (+ yt-dlp-ejs challenge solver)
+numpy>=1.26
+opencv-python-headless>=4.9,<5   # face tracking, frame effects
+pillow>=10.0                     # emoji/text images
+
+# --- speech to text (local, free) ---
+faster-whisper>=1.1
+
+# --- config / secrets ---
+python-dotenv>=1.0
+
+# --- AI providers (only the one you configure is used) ---
+openai>=1.50
+google-genai>=1.0
+
+# --- Google Sheets + YouTube official APIs ---
+gspread>=6.0
+google-auth>=2.30
+google-auth-oauthlib>=1.2
+google-api-python-client>=2.130
+
+# --- HTTP (Instagram Graph API) ---
+requests>=2.31
+tzdata                      # time zones on Windows (post times)

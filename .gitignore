@@ -1,0 +1,61 @@
+# --- secrets: NEVER commit ---
+.env
+*.env
+!.env.example
+secrets/
+credentials*.json
+client_secret*.json
+service_account*.json
+token*.json
+*.pickle
+cookies*.txt
+
+# --- data, media, models, logs ---
+data/
+storage/**
+!storage/**/.gitkeep
+models/
+logs/
+.cache/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.m4a
+*.wav
+*.mp3
+*.opus
+
+# assets: keep the folders + license notes, not the (licensed) media files
+assets/music/**
+assets/sfx/**
+assets/luts/**
+assets/overlays/**
+assets/transitions/**
+assets/backgrounds/**
+audio and editing bundles/
+*.cube
+*.zip
+!assets/**/.gitkeep
+!assets/**/LICENSES.md
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# extra safety
+*.db
+*.db-*
+*.log
+*.sqlite
