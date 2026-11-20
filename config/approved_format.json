@@ -1,0 +1,225 @@
+{
+ "_help": "frozen approved clip format, see tests/test_format.py",
+ "presets": {
+  "card": {
+   "description": "Trending GTA 6 format (studied 2026-11-19: 'Airport reveal in gta 6' 924K likes, Mythpat map size, Speed can't steal any car): black page, one plain title line with an emoji, the WHOLE 16:9 frame uncut in the middle, big captions under it, stream audio only, 60 fps",
+   "layout": "card",
+   "resolution": [
+    1080,
+    1920
+   ],
+   "fps": "source",
+   "card_video_y": 0.47,
+   "title_cfg": {
+    "size": 60,
+    "color": [
+     255,
+     255,
+     255
+    ],
+    "font": "arialbd.ttf"
+   },
+   "title_gap": 36,
+   "card_caption_gap": 150,
+   "captions": "card_words",
+   "hook_overlay": "none",
+   "motion": "pro",
+   "color_grade": "natural",
+   "sound": "pro"
+  },
+  "facecam_top": {
+   "description": "Trending streamer format (Mythpat Ferrari, World's first 6 star, random NPC events): streamer face on top (34%), gameplay below, the title banner fixed on the seam for the whole clip, word captions under it, stream audio only, 60 fps",
+   "layout": "split",
+   "cam_on_top": true,
+   "top_panel_ratio": 0.66,
+   "resolution": [
+    1080,
+    1920
+   ],
+   "fps": "source",
+   "title_cfg": {
+    "size": 46,
+    "color": [
+     0,
+     0,
+     0
+    ],
+    "box": [
+     255,
+     255,
+     255
+    ],
+    "font": "arialbd.ttf",
+    "max_w_ratio": 0.78
+   },
+   "captions": "seam_words",
+   "hook_overlay": "none",
+   "motion": "pro",
+   "color_grade": "natural",
+   "sound": "pro",
+   "title_y": 652,
+   "min_cam_face": 0.06,
+   "cam_face_mult": 2.7,
+   "cam_min_crop": 0.19
+  },
+  "viral_auto": {
+   "description": "facecam_top when the stream has a facecam, else card",
+   "layout": "facecam_or_card",
+   "resolution": [
+    1080,
+    1920
+   ],
+   "fps": "source",
+   "card_video_y": 0.47,
+   "title_cfg": {
+    "size": 60,
+    "color": [
+     255,
+     255,
+     255
+    ],
+    "font": "arialbd.ttf"
+   },
+   "title_gap": 36,
+   "card_caption_gap": 150,
+   "captions": "card_words",
+   "hook_overlay": "none",
+   "motion": "pro",
+   "color_grade": "natural",
+   "sound": "pro",
+   "cam_on_top": true,
+   "top_panel_ratio": 0.66,
+   "title_y": 652,
+   "split_captions": "seam_words",
+   "min_cam_face": 0.06,
+   "cam_face_mult": 2.7,
+   "cam_min_crop": 0.19
+  }
+ },
+ "caption_styles": {
+  "card_words": {
+   "position_y": 1400,
+   "small_font": "Arial Black",
+   "small_size": 54,
+   "small_color": "#FFFFFF",
+   "keyword_font": "Arial Black",
+   "keyword_size": 64,
+   "keyword_color": "#FFD21F",
+   "keyword_italic": false,
+   "shock_font": "Georgia",
+   "shock_size": 124,
+   "shock_color": "#F02D2D",
+   "glow_size": 8,
+   "glow_blur": 12,
+   "max_words": 3,
+   "max_chars": 18,
+   "animation": "chunk",
+   "uppercase": true,
+   "censor_profanity": true
+  },
+  "seam_words": {
+   "position_y": 870,
+   "small_font": "Arial Black",
+   "small_size": 50,
+   "small_color": "#FFFFFF",
+   "keyword_font": "Arial Black",
+   "keyword_size": 58,
+   "keyword_color": "#FFD21F",
+   "keyword_italic": false,
+   "shock_font": "Georgia",
+   "shock_size": 124,
+   "shock_color": "#F02D2D",
+   "glow_size": 8,
+   "glow_blur": 12,
+   "max_words": 3,
+   "max_chars": 18,
+   "animation": "chunk",
+   "uppercase": true,
+   "censor_profanity": true
+  }
+ },
+ "motion": {
+  "pro": {
+   "_help": "measured on 19 trending GTA 6 clips (2026-11-20): dead air cut (shots ~1.5-3 s in edited clips), quick 0.2-0.4 s zooms of 2-6 %, real-time 60 fps, no shakes/flashes/cold-open repeat",
+   "cold_open": false,
+   "cold_open_seconds": 1.6,
+   "intro_zoom": 1.0,
+   "intro_seconds": 0.35,
+   "punch_zoom": 0.06,
+   "punch_decay": 0.5,
+   "punch_every_s": 6,
+   "max_punches_per_4s": 1,
+   "shake_px": 0,
+   "shake_rotate_deg": 0.0,
+   "slow_push": 0.0,
+   "jump_cut_zoom": 1.05,
+   "flash_transition": false,
+   "glitch_transition": false,
+   "cut_silences": true,
+   "silence_min_gap": 1.2,
+   "silence_keep": 0.35,
+   "drop_overlay": [],
+   "drop_overlay_seconds": 1.0,
+   "drop_overlay_strength": 0.0,
+   "drop_overlay_lead": 0.1
+  }
+ },
+ "sound": {
+  "pro": {
+   "_help": "streamer + game audio; licensed music (assets/music) very low under speech only if you add tracks; a soft whoosh on zoom punches",
+   "music_mode": "library_only",
+   "music_volume": 0.12,
+   "music_duck_under_speech": 0.3,
+   "sfx_whoosh_on_cuts": 0.0,
+   "sfx_whoosh_on_punch": 0.12,
+   "sfx_boom_on_drop": 0.0,
+   "sfx_riser_before_drop": 0.0,
+   "sfx_glitch_on_drop": 0.0,
+   "sfx_boom_on_shake": 0.0,
+   "sfx_shutter_on_drop": 0.0,
+   "noise_reduction": false,
+   "loudness_lufs": -14,
+   "true_peak_db": -1.5
+  }
+ },
+ "color_grades": {
+  "natural": {
+   "contrast": 1.03,
+   "gamma": 0.98,
+   "saturation": 1.06,
+   "sharpen": 0.18,
+   "vignette": 0.0,
+   "lut": "",
+   "lut_strength": 0.0
+  }
+ },
+ "export": {
+  "video_codec": "libx264",
+  "crf": 16,
+  "preset": "slow",
+  "audio_bitrate": "192k",
+  "gpu_encoder": "auto_off"
+ },
+ "settings": {
+  "editing_preset": "viral_auto",
+  "voice_commentary": false,
+  "music_mode": "none",
+  "clip_min_seconds": 20,
+  "clip_max_seconds": 75,
+  "final_max_seconds": 90,
+  "long_clip_kinds": [
+   "funny",
+   "story"
+  ],
+  "long_clip_max_seconds": 110,
+  "source_max_height": 1440,
+  "focus_scan_over_minutes": 150,
+  "focus_scan_minutes": 60,
+  "focus_scan_model": "base",
+  "focus_scan_beam": 1,
+  "voice_take_mode": "text",
+  "only_topic_videos": false,
+  "min_score": 70,
+  "clips_per_video": 9
+ }
+}

@@ -41,8 +41,9 @@ class SheetIO:
     """read(tab) → rows (list of lists of str, row 1 = headers)."""
 
     def tabs(self) -> list[str]: ...
-    def add_tab(self, name: str, headers: list[str], widths=None, dropdowns=None): ...
-    def format_tab(self, name: str, widths=None, dropdowns=None): ...  # (re)apply widths + dropdowns
+    def add_tab(self, name: str, headers: list[str], widths=None, dropdowns=None, typed=None): ...
+    def format_tab(self, name: str, widths=None, dropdowns=None, typed=None): ...  # widths, dropdowns, header colours
+    def arrange(self, order: list[str], colors: dict): ...       # tab order + tab colours
     def read(self, tab: str) -> list[list[str]]: ...
     def write_all(self, tab: str, rows: list[list]): ...          # replace the whole tab (rows incl. headers)
     def update_cells(self, tab: str, cells: list[tuple]): ...     # [(row, col, value)], 1-based
@@ -57,11 +58,14 @@ class MemorySheet(SheetIO):
     def tabs(self):
         return list(self.data)
 
-    def add_tab(self, name, headers, widths=None, dropdowns=None):
+    def add_tab(self, name, headers, widths=None, dropdowns=None, typed=None):
         self.data[name] = [list(headers)]
 
-    def format_tab(self, name, widths=None, dropdowns=None):
+    def format_tab(self, name, widths=None, dropdowns=None, typed=None):
         pass
+
+    def arrange(self, order, colors):
+        self.data = {k: self.data[k] for k in sorted(self.data, key=lambda t: order.index(t) if t in order else 99)}
 
     def read(self, tab):
         return [list(r) for r in self.data.get(tab, [])]
@@ -115,24 +119,45 @@ class GoogleSheet(SheetIO):
     def tabs(self):
         return [w.title for w in self._call(self.sh.worksheets)]
 
-    def add_tab(self, name, headers, widths=None, dropdowns=None):
+    def add_tab(self, name, headers, widths=None, dropdowns=None, typed=None):
         ws = self._call(self.sh.add_worksheet, title=name, rows=1000, cols=max(len(headers), 6))
         self._ws[name] = ws
         self._call(ws.update, values=[headers], range_name="A1")
-        self.format_tab(name, widths, dropdowns)
+        self.format_tab(name, widths, dropdowns, typed)
+
+    def arrange(self, order, colors):
+        """Put the tabs in `order` and colour them (unknown tabs of yours go to the end)."""
+        sheets = self._call(self.sh.worksheets)
+        sheets.sort(key=lambda w: order.index(w.title) if w.title in order else 99)
+        reqs = []
+        for i, w in enumerate(sheets):
+            props, fields = {"sheetId": w.id, "index": i}, ["index"]
+            if w.title in colors:
+                r, g, b = colors[w.title]
+                props["tabColor"] = {"red": r, "green": g, "blue": b}
+                fields.append("tabColor")
+            reqs.append({"updateSheetProperties": {"properties": props, "fields": ",".join(fields)}})
+        if reqs:
+            self._call(self.sh.batch_update, {"requests": reqs})
 
     def _fit_cols(self, ws, n):
         if ws.col_count < n:                       # a newer version added columns
             self._call(ws.add_cols, n - ws.col_count)
 
-    def format_tab(self, name, widths=None, dropdowns=None):
+    def format_tab(self, name, widths=None, dropdowns=None, typed=None):
+        """Header row: bold; GREEN = a column you type in, grey = the farm fills it (typing there does nothing)."""
         ws = self.ws(name)
         self._fit_cols(ws, len(widths or []))
-        reqs = [{"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1},
-                                "cell": {"userEnteredFormat": {"textFormat": {"bold": True},
-                                                               "backgroundColor": {"red": 0.93, "green": 0.93,
-                                                                                   "blue": 0.93}}},
-                                "fields": "userEnteredFormat(textFormat,backgroundColor)"}},
+
+        def head(c0, c1, rgb):
+            return {"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1,
+                                             "startColumnIndex": c0, "endColumnIndex": c1},
+                                   "cell": {"userEnteredFormat": {"textFormat": {"bold": True},
+                                                                  "backgroundColor": dict(zip(("red", "green", "blue"), rgb))}},
+                                   "fields": "userEnteredFormat(textFormat,backgroundColor)"}}
+        reqs = [head(0, max(len(widths or []), 1), (0.90, 0.90, 0.90))]
+        reqs += [head(c - 1, c, (0.72, 0.88, 0.72)) for c in (typed or [])]
+        reqs += [
                 {"updateSheetProperties": {"properties": {"sheetId": ws.id,
                                                           "gridProperties": {"frozenRowCount": 1}},
                                            "fields": "gridProperties.frozenRowCount"}},

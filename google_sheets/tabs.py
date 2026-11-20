@@ -1,4 +1,4 @@
-"""The 7 tabs of the control panel: names, columns, which columns YOU type in, dropdowns.
+"""The tabs of the control panel: names, columns, which columns YOU type in, dropdowns.
 
 Columns are found by their header name, so you may reorder columns or add your own (the farm
 ignores unknown columns in Video Input, and keeps your own notes in Ready to Post).
@@ -14,8 +14,20 @@ SETTINGS = "Settings"
 PERFORMANCE = "Performance"
 TRENDS = "Trends"
 AUDIT = "Audit"
+GUIDE = "START HERE"
+
+# tab order in the sheet + tab colour: green = you type here, blue = just look, grey = advanced
+ORDER = [GUIDE, VIDEO_INPUT, SCHEDULE, READY, POSTED, PERFORMANCE, SETTINGS, PROCESSING, FAILED, TRENDS, AUDIT]
+GREEN, BLUE, GREY, ORANGE = (0.20, 0.66, 0.33), (0.26, 0.52, 0.96), (0.62, 0.62, 0.62), (1.0, 0.6, 0.0)
+TAB_COLORS = {GUIDE: ORANGE, VIDEO_INPUT: GREEN, READY: GREEN, SETTINGS: GREEN, SCHEDULE: BLUE, POSTED: BLUE,
+              PERFORMANCE: BLUE, PROCESSING: GREY, FAILED: GREY, TRENDS: GREY, AUDIT: GREY}
 
 TABS = {
+    GUIDE: {
+        # written by the farm on every sync: what is happening now + how to use the sheet
+        "headers": ["CLIPPING FARM", ""],
+        "widths": [300, 760],
+    },
     VIDEO_INPUT: {
         # you type: URL (+ optional Clips Wanted, Language, Section, Layout, Platforms). Status: type retry / redo
         "headers": ["URL", "Clips Wanted", "Language", "Section", "Layout", "Platforms",
@@ -23,6 +35,7 @@ TABS = {
         "widths": [320, 90, 80, 130, 80, 140, 110, 100, 280, 80, 130, 130, 300],
         "dropdowns": {3: ["auto", "en", "hi"], 5: ["auto", "split", "full"],
                       8: ["new", "retry", "redo"]},
+        "typed": [1, 2, 3, 4, 5, 6, 8],
     },
     PROCESSING: {
         "headers": ["Item", "Title", "Stage", "Progress", "Attempts", "Updated At", "Message"],
@@ -30,22 +43,25 @@ TABS = {
     },
     READY: {
         # you type: Approve (yes / no / remake / posted), Post Time (YYYY-MM-DD HH:MM), Notes
-        # Folder = link: opens the clip's folder in Explorer and plays the video (needs `main.py watch` or `serve`)
-        "headers": ["Clip ID", "Post Time", "Approve", "Status", "Folder", "Platforms", "On-screen Hook",
-                    "YouTube Title", "Instagram Caption", "Hashtags", "YouTube Description", "Pin Comment",
-                    "Length (s)", "Score", "Kind", "Creator", "Video ID", "Notes"],
-        "widths": [90, 130, 80, 120, 150, 130, 200, 260, 300, 260, 300, 240, 70, 60, 80, 110, 110, 200],
-        "dropdowns": {3: ["yes", "no", "remake", "posted", "retry"]},
+        # Watch = link: plays the clip (needs `main.py watch` or `serve`); details are on the right
+        "headers": ["Clip ID", "Watch", "YouTube Title", "Post Time", "Approve", "Status", "Notes", "Length (s)",
+                    "Instagram Caption", "Hashtags", "YouTube Description", "Pin Comment", "On-screen Hook",
+                    "Platforms", "Score", "Kind", "Creator", "Video ID"],
+        "widths": [90, 130, 300, 130, 80, 150, 220, 70, 300, 260, 300, 240, 200, 130, 60, 80, 110, 110],
+        "dropdowns": {5: ["yes", "no", "remake", "posted", "retry"]},
+        "typed": [4, 5, 7],
     },
     SCHEDULE: {
-        "headers": ["Post Time", "Clip ID", "Platform", "Status", "Attempts", "Last Error", "YouTube Title"],
-        "widths": [130, 90, 90, 130, 70, 300, 280],
+        # one row per clip, next post first (view only: change times in Ready to Post)
+        "headers": ["Post Time", "Day", "Clip ID", "YouTube Title", "Where", "Status", "Watch", "Problem"],
+        "widths": [130, 110, 90, 340, 160, 170, 130, 320],
     },
     POSTED: {
         # Post URL: paste the link here for clips you posted by hand
-        "headers": ["Posted At", "Clip ID", "Platform", "Post URL", "Folder", "External ID", "Title", "Views",
-                    "Likes", "Comments"],
-        "widths": [130, 90, 90, 300, 150, 160, 280, 70, 70, 80],
+        "headers": ["Posted At", "Clip ID", "YouTube Title", "Platform", "Post URL", "Views", "Likes", "Comments",
+                    "Watch"],
+        "widths": [130, 90, 320, 90, 320, 70, 70, 80, 130],
+        "typed": [5],
     },
     FAILED: {
         "headers": ["Time", "Item", "Stage", "Error", "Next Action"],
@@ -72,6 +88,7 @@ TABS = {
     SETTINGS: {
         "headers": ["Key", "Value", "Meaning"],
         "widths": [220, 200, 520],
+        "typed": [2],
     },
 }
 
@@ -112,7 +129,7 @@ SETTINGS_ROWS = [
     ("timezone", "e.g. Asia/Kolkata"),
     ("ai_provider", "openai / gemini / offline"),
     ("caption_language", "auto / en / hinglish"),
-    ("editing_preset", "auto / streamer_split / game_full"),
+    ("editing_preset", "viral_auto (trending format: face on top or black card) / card / facecam_top / auto / streamer_split / game_full"),
     ("music_mode", "library / generated / none"),
     ("sheet_poll_seconds", "how often the farm reads this sheet"),
 ]

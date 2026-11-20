@@ -96,3 +96,71 @@ for the trends finder.
 - sometimes one title-fix call: ~$0.0015
 - = about $0.01 = **about Rs 0.9 per clip**; voice (Kokoro), editing, YouTube/Instagram APIs: free
 - 5 clips a day = about Rs 5/day, Rs 140/month; trends/stats/audit add less than Rs 5/month
+
+## Launch-day check (2026-11-19, GTA 6 release day)
+Numbers at 12:00 IST (YouTube Data API; Instagram views need instagram_manage_insights, so only likes):
+farm Shorts CLIP0004-0009 got 0-4 views each; the hand-upload "GTA-6 BODYGUARD" is at 1,295.
+Instagram: 0-1 likes per Reel, CLIP0005 removed by Instagram. No YouTube claims, no Instagram restriction
+(Account Status OK except monetization "Established presence" = new account, does not limit reach).
+
+What was wrong, and what we can control:
+1. **Two Reels never went up.** CLIP0007 (48 MB) and CLIP0009 (58 MB) got `ProcessingFailedError` from
+   Instagram's upload server; every copy <= 38 MB went through. Fix: the Instagram copy is now capped at
+   35 MB (`posting/instagram.ig_video_kbps`: 8 Mbps for short clips, lower for long ones; Instagram
+   re-encodes Reels far below that anyway). Old oversized copies are re-made automatically.
+2. **The narrator, our only original part, was often missing or sounded like a repost.** Intro lines were
+   11-13 words (too long for the 4.2 s slot, so dropped: CLIP0007 had NO intro) and most started with
+   "IGN ..." / "Here's IGN's take" / "This clip ...", which tells a new viewer "this is someone else's
+   video" in the first second. Fixes: prompt asks 5-9 words that start with what we SEE; `check_line`
+   drops intros starting with the uploader/"this clip"; max 10 words; saved packages are re-checked
+   (`voiceover.recheck_saved`); if no intro survives, ONE small AI call writes new lines
+   (`pipeline.needs_voice_retry`, ~Rs 0.2, once per clip). Today's unposted CLIP0010-0013 were remade.
+3. **Source.** The IGN review (pre-launch, age-restricted, a reviewer talking) is the wrong source on launch
+   day. The trends finder shows the biggest fresh GTA 6 streams today, incl. two Indian creators (Hindi
+   audience = our audience). Pasting a source stays the user's choice.
+4. **Cold start (not a bug).** 3-day-old accounts, 0 followers. YouTube first shows a Short to a small test
+   group and widens only if people choose to watch instead of swiping ("viewed vs swiped away" in Studio).
+   Instagram does not recommend accounts that mostly repost others' videos to non-followers; adding real
+   commentary/voiceover is the stated way to count as transformed.
+
+Sources: Instagram [original content ranking](https://www.engadget.com/instagrams-algorithm-overhaul-will-reward-original-content-and-penalize-aggregators-130018977.html),
+[2026 reposts update](https://petapixel.com/2026/04/30/new-instagram-policies-target-reposted-content/),
+[Trial reels (Meta)](https://about.fb.com/news/2024/12/trial-reels-try-content-non-followers/) (needs a
+professional account and, per third-party guides, ~200 followers — not available to us yet),
+[Shorts algorithm in YouTube's words](https://outlierkit.com/resources/youtube-shorts-algorithm/) (secondary),
+Meta [resumable uploads](https://developers.facebook.com/docs/instagram-platform/content-publishing/resumable-uploads/).
+Vendor blogs (15-45 s for gaming clips, peak in the first 1-2 s, sound-off readable hooks) are heuristics only.
+
+## The trending format (studied 2026-11-20 from 19 viral GTA 6 Shorts/Reels the user picked, up to 924K likes)
+Measured with ffmpeg/OpenCV/Whisper (scratch study, numbers are medians):
+- **Topic**: a PREMISE a stranger gets in one line, visibly happening: "Airport reveal in GTA 6", "World's
+  first 6 star wanted level", "IShowSpeed almost eaten by a GTA 6 alligator", "The NPCs are crazy in GTA 6".
+  Streamer chatter / inside jokes ("wallet gaya") never.
+- **First second**: the streamer is already reacting at 0.0 s ("No way we got a new train in GTA", "The heck
+  is going on over here"). No intro, no narrator, no cold-open repeat.
+- **Length** 45 s median (10 s - 3 min). **Cuts** 1.3 per 10 s median: reaction clips run uncut; edited ones
+  cut dead air (shots 1.5-3 s). **Zooms**: quick 0.2-0.4 s moves of 2-6 %, a few 12-20 % pushes on peaks;
+  half the clips have none. **Music**: mostly none (game audio fills gaps); 4-5 of 19 a quiet bed.
+  **60 fps** at real speed. **-14 LUFS**.
+- **Layouts**: (a) face on top ~34 %, gameplay below, title in a white/black rounded box on the seam, small
+  white caps captions (1-3 words, one yellow keyword) under it; (b) black card: plain white title + emoji
+  above the WHOLE uncut 16:9 frame, captions below.
+- Farm: presets `viral_auto` (a or b automatically), `facecam_top`, `card`; motion/sound `pro`;
+  `ai/vision.py` checks the title against 4 frames; music only from licensed tracks in assets/music.
+- Bug found the same day: 60 fps sources were decoded frame-by-frame into 30 fps output = half-speed
+  "slow motion" picture. Fixed with an fps filter in the decoder (editor/renderer.py).
+
+## 2026-11-20: approved format locked
+
+The user approved CLIP0036 and CLIP0042 ("that quality is superb, keep it like that"). Every setting that
+shapes those clips is frozen in `config/approved_format.json`, and `python -m tests.test_format` fails if
+`config/editing_presets.json` or `config/settings.json` drift from it. The approved format:
+- `editing_preset` = `viral_auto`: streamer face on top when there is a facecam, otherwise the black card
+- one plain title with an emoji in a white box for the whole clip
+- small white captions with a yellow keyword
+- the source frame rate (60 fps), so it plays at real speed
+- quick 2–6 % zooms and trimmed silences
+- the streamer's own voice only (`voice_commentary` = no) and no music (`music_mode` = none)
+- the vision check fixes titles that don't match the frames
+
+To change the format: make a sample, get the user's OK, then run `python -m tests.test_format --save`.

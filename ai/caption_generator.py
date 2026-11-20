@@ -184,6 +184,7 @@ def finish_package(out, moment, info, text, language, settings, used=None) -> di
         "game": name if topic else game,
         **lines,
         "pin_comment": out.get("pin_comment", ""),
+        "banner": quality.clean_text(out.get("banner", ""))[:80],
         "best_time_note": out.get("best_time_note", ""),
         "search_queries": out.get("search_queries", [])[:3],
         "loop_line": out.get("loop_line", ""),

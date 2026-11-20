@@ -208,10 +208,12 @@ def library_track(dur, mood=None):
 def music_for(dur, mode, variant, mood=None):
     if mode == "none":
         return None, "none"
-    if mode == "library":
+    if mode in ("library", "library_only"):
         sig, name = library_track(dur, mood)
         if sig is not None:
             return sig, name
+        if mode == "library_only":       # no licensed track: no music at all (generated beats sound cheap)
+            return None, "none (no track in assets/music)"
     return generated_beat(dur, variant)
 
 

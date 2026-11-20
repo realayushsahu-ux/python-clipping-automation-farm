@@ -55,6 +55,25 @@ def smooth_track(n, pts, sigma=9.0, bounds=None):
     return xs, ys
 
 
+def static_cam(faces, n, share=0.35):
+    """A small facecam box: the face that stays in ONE spot near the frame's edge in >= share of the
+    sampled frames, even when bigger game faces walk past (e.g. CarryMinati: cam box left-middle)."""
+    pts = [(k, f) for k, v in faces.items() for f in v if f[3] < 0.35]
+    if not pts:
+        return None
+    best, best_frames = None, set()
+    for _, f in pts[:: max(1, len(pts) // 400)]:          # candidate centres (sampled)
+        if 0.3 <= f[0] <= 0.7 and 0.3 <= f[1] <= 0.7:     # a facecam sits at an edge, not in the middle
+            continue
+        frames = {k for k, g in pts if abs(g[0] - f[0]) < 0.05 and abs(g[1] - f[1]) < 0.07}
+        if len(frames) > len(best_frames):
+            best, best_frames = f, frames
+    if best is None or len(best_frames) < share * (n / 2):
+        return None
+    near = np.array([(g[0], g[1], g[3]) for k, g in pts if abs(g[0] - best[0]) < 0.05 and abs(g[1] - best[1]) < 0.07])
+    return np.median(near, axis=0)
+
+
 def plan_layout(want, cuts, faces, n):
     """'split' when a facecam sits in one place for much of the clip, else 'full'."""
     big = {k: max(v, key=lambda f: f[2] * f[3] * f[4]) for k, v in faces.items() if v}
@@ -65,6 +84,12 @@ def plan_layout(want, cuts, faces, n):
         near = [k for k, f in big.items() if abs(f[0] - med[0]) < 0.08 and abs(f[1] - med[1]) < 0.1]
         if len(near) >= 0.35 * (n / 2) and med[2] < 0.5:
             cam = med
+    if cam is not None and 0.25 < cam[0] < 0.75 and 0.25 < cam[1] < 0.75:
+        cam = None          # a face in the middle of the frame is a game character (cutscene), not a facecam
+    cam_kind = "big" if cam is not None else None
+    if cam is None:
+        cam = static_cam(faces, n)
+        cam_kind = "static" if cam is not None else None
     layout = want if want in ("split", "full") else ("split" if cam is not None else "full")
     if layout == "split" and cam is None:
         layout = "full"
@@ -81,7 +106,7 @@ def plan_layout(want, cuts, faces, n):
         fy = np.clip(np.where(np.isnan(fy), cam[1], fy), cam[1] - 0.1, cam[1] + 0.1)
         # crop size locked to the typical face size: a turned/covered face must not zoom out
         size = float(np.median([p[2] for p in pts.values()])) if pts else float(cam[2])
-        return {"layout": "split", "cam": cam, "fx": fx, "fy": fy, "fs": np.full(n, size)}
+        return {"layout": "split", "cam": cam, "cam_kind": cam_kind, "fx": fx, "fy": fy, "fs": np.full(n, size)}
     pts = {}
     for k, v in faces.items():
         if not v:
@@ -102,9 +127,22 @@ def _affine(cx, cy, scale, ocx, ocy, rot=0.0):
     return np.hstack([A, t[:, None]]).astype(np.float32)
 
 
-def render_frame(frame, lay, sf, z, dx, dy, rot, W, H, top_ratio=0.55):
-    """Source BGR frame (any 16:9 size) → W x H vertical frame."""
+def render_frame(frame, lay, sf, z, dx, dy, rot, W, H, top_ratio=0.55, cam_top=False):
+    """Source BGR frame (any 16:9 size) → W x H vertical frame. Split: gameplay panel is top_ratio of
+    the height; cam_top puts the streamer's face panel ABOVE the gameplay."""
     sh, sw = frame.shape[:2]
+    if lay["layout"] == "card":
+        # trending "card": black page, the WHOLE 16:9 frame (game + the stream's own facecam), never cropped
+        out = lay["bg"].copy()
+        vy, vh = lay["vy"], lay["vh"]
+        src = frame
+        if z > 1.001:                                   # gentle push-in on a peak, centred
+            ch, cw = int(sh / z), int(sw / z)
+            y0, x0 = (sh - ch) // 2, (sw - cw) // 2
+            src = frame[y0:y0 + ch, x0:x0 + cw]
+        interp = cv2.INTER_AREA if src.shape[1] > W else cv2.INTER_CUBIC
+        out[vy:vy + vh] = cv2.resize(src, (W, vh), interpolation=interp)
+        return out
     if lay["layout"] == "full":
         ch = sh / z
         cw = ch * W / H
@@ -124,15 +162,19 @@ def render_frame(frame, lay, sf, z, dx, dy, rot, W, H, top_ratio=0.55):
         tx = min(cam_l + 0.1 * tw, sw / 2 + tw / 2) - tw / 2
     tx = float(np.clip(tx, tw / 2, sw - tw / 2))
     M = _affine(tx, sh / 2, top_h / th, W / 2 + dx * 0.5, top_h / 2 + dy * 0.5, rot * 0.5)
-    out[:top_h] = cv2.warpAffine(frame, M, (W, top_h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    game = cv2.warpAffine(frame, M, (W, top_h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
     bh = H - top_h
     fh = lay["fs"][sf] * sh
-    ch = np.clip(fh * 3.3, sh * 0.28, sh * 0.52) / z
+    ch = np.clip(fh * lay.get("cam_mult", 3.3), sh * lay.get("cam_min", 0.28), sh * 0.52) / z
     cw = ch * W / bh
     cx = np.clip(lay["fx"][sf] * sw, cw / 2, sw - cw / 2)
     cy = np.clip(lay["fy"][sf] * sh + 0.1 * ch, ch / 2, sh - ch / 2)
     M = _affine(cx, cy, bh / ch, W / 2 + dx, bh / 2 + dy, rot)
-    out[top_h:] = cv2.warpAffine(frame, M, (W, bh), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    face = cv2.warpAffine(frame, M, (W, bh), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    if cam_top:
+        out[:bh], out[bh:] = face, game
+    else:
+        out[:top_h], out[top_h:] = game, face
     return out
 
 

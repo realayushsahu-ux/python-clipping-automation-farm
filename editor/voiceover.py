@@ -22,7 +22,7 @@ log = get_logger("voice")
 MODEL_DIR = ROOT / "models" / "kokoro"
 MAX_INTRO_S = 4.2
 MAX_TAKE_S = 5.0
-MAX_INTRO_WORDS = 12
+MAX_INTRO_WORDS = 10     # 11+ words never fit MAX_INTRO_S at speed 1.12 (measured 2026-11-18: 4.3-4.8 s)
 MAX_TAKE_WORDS = 15
 
 # lines every lazy clip channel says: they add nothing a viewer couldn't guess (= not original commentary)
@@ -30,6 +30,11 @@ GENERIC = ("watch till the end", "wait for it", "you won't believe", "you wont b
            "like and subscribe", "subscribe", "what happens next", "check this out", "look at this",
            "this is crazy", "crazy moment", "must watch", "don't miss", "let's go", "lets go", "comment below",
            "follow for more", "part 2", "unbelievable", "mind blowing", "mind-blowing", "epic moment")
+# an intro that opens with the uploader / "this clip" tells the viewer it is someone else's video and wastes
+# the first second (2026-11-19: "IGN reacts to...", "Here's IGN's take...", "This clip proves...")
+SOURCE_FIRST = {"ign", "gamespot", "polygon", "kotaku", "eurogamer", "gameinformer", "review", "reviews",
+                "here's", "heres"}
+REPOST_STARTS = {"this clip", "this video", "in this", "here is", "check out"}
 STOP = set("""the a an and or but so to of in on at for with is it this that these those was were be been are
 he she they his her their them you your we our i me my just what how why who when then than there here
 does did do not no yes very really about into out up down off over again more most some any all can will
@@ -39,6 +44,12 @@ would could should has have had get got gets going goes go""".split())
 # ------------------------------------------------------------------------------------- checks
 def _words(t):
     return re.findall(r"[a-z0-9']+", (t or "").lower())
+
+
+def _repost_start(w) -> bool:
+    """First words name the uploader ("IGN", "IGN's") or point at the video ("This clip ...")."""
+    return bool(w) and (re.sub(r"'s$", "", w[0]) in SOURCE_FIRST or w[0] in SOURCE_FIRST
+                        or " ".join(w[:2]) in REPOST_STARTS)
 
 
 def check_line(line, kind, context, hook="", used=()) -> tuple[str, str]:
@@ -52,6 +63,8 @@ def check_line(line, kind, context, hook="", used=()) -> tuple[str, str]:
     if len(w) < 4 or len(w) > limit:
         return "", f"{len(w)} words (4-{limit})"
     low = line.lower()
+    if kind == "intro" and _repost_start(w):
+        return "", f"starts with '{line.split()[0]}' (sounds like a repost) - start with what we see"
     bad = [g for g in GENERIC if g in low]
     if bad:
         return "", f"generic ({bad[0]})"
@@ -69,6 +82,34 @@ def check_line(line, kind, context, hook="", used=()) -> tuple[str, str]:
     if kind == "take" and not line.endswith("?"):
         line = line.rstrip(".!") + "?"
     return line, ""
+
+
+def stale_intro(line) -> str:
+    """Why a SAVED intro (from an older package) breaks today's rules, or "" (context-free checks only)."""
+    w = _words(line)
+    if not w:
+        return ""
+    if len(w) > MAX_INTRO_WORDS:
+        return f"{len(w)} words (max {MAX_INTRO_WORDS})"
+    if _repost_start(w):
+        return f"starts with '{line.split()[0]}' (sounds like a repost)"
+    return ""
+
+
+def recheck_saved(pkg: dict) -> list:
+    """Drop saved intro lines that break today's rules; the first alt that passes moves up. → notes."""
+    notes = []
+    lines = [x for x in [pkg.get("voice_intro"), *(pkg.get("voice_intro_alts") or [])] if x]
+    keep = []
+    for x in lines:
+        why = stale_intro(x)
+        if why:
+            notes.append(f"saved intro dropped ({why}): {x}")
+        else:
+            keep.append(x)
+    if notes:
+        pkg["voice_intro"], pkg["voice_intro_alts"] = (keep[0] if keep else ""), keep[1:]
+    return notes
 
 
 def pick_lines(out: dict, context: str, hook: str, used=()) -> dict:
@@ -168,7 +209,8 @@ def text_parts(text, clip_dur, per_word=0.32, max_words=6):
     ws = text.split()
     parts = [ws[i:i + max_words] for i in range(0, len(ws), max_words)]
     if len(parts) > 1 and len(parts[-1]) <= 2:              # no lonely last word
-        parts[-2] += parts.pop()
+        last = parts.pop()
+        parts[-1] += last
     total = min(max(3.0, per_word * len(ws) + 0.6), 6.0, clip_dur * 0.4)
     t, out = clip_dur - total, []
     for p in parts:

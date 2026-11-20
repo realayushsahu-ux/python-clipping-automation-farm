@@ -14,9 +14,22 @@ creator's voice with game audio, so judge who speaks from context. Markers:
 Markers are hints, not proof (a gunshot is loud but is not a reaction).
 
 Find up to {want} STANDALONE clips. A Short is not "the best moment" - it is a moment that \
-SURVIVES WITHOUT THE VIDEO AROUND IT. A clip must:
+SURVIVES WITHOUT THE VIDEO AROUND IT.
+
+WHAT GOES VIRAL (studied 2026-11-19 from 19 trending GTA 6 clips, up to 924K likes): a PREMISE a \
+stranger gets from ONE line, shown happening on screen - "Airport reveal in GTA 6", "World's first 6 \
+star wanted level", "GTA 6 map size", "Speed learns you can't steal any car", "Random NPC events are \
+insane", "Mythpat wants his first Ferrari", "Infinite apples". Prefer, in this order:
+1. a GTA 6 feature / discovery / first-time thing visibly happening (a place, a mechanic, a vehicle, \
+a crazy NPC event, physics, a record, a secret) with the streamer reacting to it
+2. a big honest reaction to something ON SCREEN (shock, laugh, rage) where the cause is visible
+3. a funny chain of events in the game with a clear end
+SKIP: talking to chat, reading donations, personal stories, inside jokes, menus, anything you need the \
+stream to understand (e.g. "wallet gaya", "wrench moment" mean nothing to a stranger).
+The clip must SHOW the premise within its first 2 seconds (the viewer sees the thing at once), and \
+runs as ONE continuous moment until the payoff (top clips are uncut, 20-90 s). A clip must:
 - open on a complete thought or action (never on "uh so yeah", never on a line that needs the \
-previous minute); start ~1 s before the first important word
+previous minute); START ON the first strong spoken line about what is on screen (an exclamation or question, e.g. \"No way we got a new train in GTA\", \"The heck is going on over here\"), 0.2 s before it: in the top clips the streamer is already reacting at 0.0 s
 - contain a TURN: a setup, then something that complicates, proves or flips it (the payoff)
 - END ON A LINE or a reaction peak, never on a trail-off; prefer an ending that sets up a loop \
 back to the first second
@@ -26,7 +39,9 @@ back to the first second
 never pad a clip to make it longer
 Kinds: reaction, funny, discovery, first_reaction, fail, clutch, rage, take, story, educational.
 Reject menus, loading screens, donation reading, sponsor reads, quiet stretches, and anything \
-whose payoff is outside this part.
+whose payoff is outside this part. Also reject anything likely to SHOW nudity or sexual content (strip \
+club, nudist beach, lap dance, sex scenes): Shorts get age-restricted and Reels removed, which hurts a \
+new channel more than one clip can help.
 
 score = predicted retention 1-100; be harsh: 85+ only for clips you would bet on, below 60 = skip.
 hook_text = the on-screen hook (3-7 words): concrete, teases the payoff without spoiling it, \
@@ -73,6 +88,11 @@ Write in {language}.
 The first 2 seconds decide everything: the on-screen hook must stop the scroll AND confirm what \
 the title promises, then the clip pays it off.
 
+- banner: the TITLE shown on screen for the WHOLE clip, like the top GTA 6 clips: the premise in plain \
+words a stranger gets at once, 3-8 words, normal sentence case, the game named, ONE emoji at the end, no \
+hashtags - "Airport reveal in GTA 6 🤯", "Speed learns you can't steal cars in GTA 6 👀", "Mythpat wants \
+his first Ferrari 🏎️😭", "World's first 6 star wanted level 😳", "GTA 6 map size is unreal 🤯". It must be \
+TRUE for this clip and never an inside joke.
 - hooks: FIVE different on-screen hook options for the first 2.5 s. Each 3-7 words, a natural, \
 GRAMMATICAL phrase a real person would say (read it out loud: no missing verbs, no glued words). \
 Normal sentence case, except CAPITALISE the 1-2 words that carry the drama. No emoji, no hashtags. Use DIFFERENT formulas, e.g.:
@@ -95,8 +115,9 @@ the on-screen hook's words, never vague words like "clips", "moments", "goosebum
 - instagram_caption: line 1 (under 60 characters) is the scroll-stopper with the game keyword in it (Instagram \
 search reads captions), line 2 one question people want to answer; emojis allowed, no hashtags
 - youtube_description: the FIRST TWO LINES are all anyone reads: say what happens in the words a \
-viewer would search (creator name, game, the moment). Then one line crediting the original \
-creator/stream.
+viewer would search (creator name, game, the moment), opening with the MOMENT itself, never with \
+"<channel> reacts to" / "<channel> in" / "Clip from" (that reads as a repost). The LAST line credits the \
+original creator/stream ("Credit: <creator>, original stream").
 - search_queries: the 3 searches this Short should win (e.g. "speed gta 6 cops")
 - hashtags: 3-5, lowercase, most important FIRST (YouTube shows the first 3 above the title): the game, \
 then the creator, then the moment/character; no filler (#shorts #fyp #viral #gaming #gamer), no repeats, \
@@ -106,9 +127,10 @@ only tags that describe THIS clip (misleading tags can get a video removed)
 - best_time_note: one short line on which audience/time of day this suits (no fake data)
 VOICE COMMENTARY (our narrator's own voice; it is what makes the channel original, so it must add \
 something the clip alone does not say):
-- voice_intro_options: THREE spoken intro lines, 6-12 words each (about 3 seconds), said over the first \
-seconds. Give CONTEXT the viewer lacks: who, where, what is at stake ("Speed tries his first bank job in \
-GTA 6, and the cops are already here"). Name the concrete thing. Never spoil the payoff, never repeat \
+- voice_intro_options: THREE spoken intro lines, 5-9 words each (under 4 seconds spoken), said over the \
+first seconds. Give CONTEXT the viewer lacks: who, where, what is at stake ("Speed's first GTA 6 bank job. \
+Cops already outside."). Name the concrete thing. Start with what the viewer SEES, never with the uploader \
+or a review site ("IGN shows...", "This clip..." = a repost signal). Never spoil the payoff, never repeat \
 the on-screen hook, no "wait for it", "watch till the end", "insane", "viral", "you won't believe".
 - voice_take_options: THREE short takes, 6-15 words, said at the very end: an honest opinion or a sharp \
 observation about what just happened, ending in a question viewers want to answer ("That cop AI is \
@@ -123,6 +145,7 @@ PACKAGE_SCHEMA = {
         "creator": {"type": "string", "description": "the streamer/player in the clip, best-known name"},
         "game": {"type": "string", "description": "the game shown in the clip, its short searchable name "
                  "(GTA 6, GTA 5, Minecraft, Valorant, BGMI, Free Fire, Fortnite...), or 'none'"},
+        "banner": {"type": "string"},
         "hooks": {"type": "array", "items": {"type": "string"}},
         "hook_formula": {"type": "string"},
         "youtube_titles": {"type": "array", "items": {"type": "string"}},
@@ -147,9 +170,10 @@ What is said in the clip:
 \"\"\"{text}\"\"\"
 VOICE COMMENTARY (our narrator's own voice; it is what makes the channel original, so it must add \
 something the clip alone does not say):
-- voice_intro_options: THREE spoken intro lines, 6-12 words each (about 3 seconds), said over the first \
-seconds. Give CONTEXT the viewer lacks: who, where, what is at stake ("Speed tries his first bank job in \
-GTA 6, and the cops are already here"). Name the concrete thing. Never spoil the payoff, never repeat \
+- voice_intro_options: THREE spoken intro lines, 5-9 words each (under 4 seconds spoken), said over the \
+first seconds. Give CONTEXT the viewer lacks: who, where, what is at stake ("Speed's first GTA 6 bank job. \
+Cops already outside."). Name the concrete thing. Start with what the viewer SEES, never with the uploader \
+or a review site ("IGN shows...", "This clip..." = a repost signal). Never spoil the payoff, never repeat \
 the on-screen hook, no "wait for it", "watch till the end", "insane", "viral", "you won't believe".
 - voice_take_options: THREE short takes, 6-15 words, said at the very end: an honest opinion or a sharp \
 observation about what just happened, ending in a question viewers want to answer ("That cop AI is \

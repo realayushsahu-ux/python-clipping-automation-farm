@@ -37,11 +37,11 @@ def _model(name: str):
         return _MODELS[name]
 
 
-def _words(model: str, audio: np.ndarray, language, offset=0.0):
+def _words(model: str, audio: np.ndarray, language, offset=0.0, beam=None):
     np.seterr(divide="ignore", over="ignore", invalid="ignore")
     segs, info = _model(model).transcribe(audio, language=language, word_timestamps=True, vad_filter=True,
                                           vad_parameters={"min_silence_duration_ms": 500},
-                                          beam_size=1 if model == "tiny" else 5, condition_on_previous_text=False)
+                                          beam_size=beam or (1 if model == "tiny" else 5), condition_on_previous_text=False)
     out = []
     for s in segs:
         for w in s.words or []:
@@ -66,7 +66,9 @@ def language(audio_path, lo: float, hi: float) -> str | None:
     return max(votes, key=votes.get) if votes else None
 
 
-def scan(audio_path, lo: float, hi: float, workdir, settings, lang=None) -> dict:
+def scan(audio_path, lo: float, hi: float, workdir, settings, lang=None, windows=None) -> dict:
+    """Whole range in 20-min blocks, or (long streams) only `windows` [(start, end)] picked from chat +
+    loudness spikes. Each block/window is cached, so a stopped run continues where it was."""
     cache = workdir / "transcript.json"
     if cache.exists():
         data = json.loads(cache.read_text(encoding="utf-8"))
@@ -76,21 +78,31 @@ def scan(audio_path, lo: float, hi: float, workdir, settings, lang=None) -> dict
         lang = language(audio_path, lo, hi) or "en"
         log.info(f"spoken language: {lang}")
     model = settings["whisper_hindi_model"] if lang.startswith("hi") else settings["whisper_scan_model"]
-    starts = list(np.arange(lo, hi, BLOCK))
-    log.info(f"listening to {(hi - lo) / 60:.0f} min in {len(starts)} block(s) (model {model})...")
-    words = []
-    for i, t in enumerate(starts):
-        part = workdir / f"transcript_{i:03d}.json"
+    if windows:
+        blocks = [(float(a), float(b)) for a, b in windows]
+        beam, tag = int(settings.get("focus_scan_beam", 1)), "w"
+        model = settings.get("focus_scan_model") or model      # this PC: small runs ~4x slower than real time
+        log.info(f"listening to {sum(b - a for a, b in blocks) / 60:.0f} of {(hi - lo) / 60:.0f} min: "
+                 f"{len(blocks)} stretch(es) where chat/voice spiked (model {model})...")
+    else:
+        blocks = [(float(t), float(min(t + BLOCK, hi))) for t in np.arange(lo, hi, BLOCK)]
+        beam, tag = None, ""
+        log.info(f"listening to {(hi - lo) / 60:.0f} min in {len(blocks)} block(s) (model {model})...")
+    words, done = [], 0.0
+    total = sum(b - a for a, b in blocks)
+    for i, (a, b) in enumerate(blocks):
+        part = workdir / (f"transcript_w{model}_{int(a)}.json" if tag else f"transcript_{i:03d}.json")
         if part.exists():
             got = json.loads(part.read_text(encoding="utf-8"))
         else:
-            got, _ = _words(model, pcm(audio_path, 16000, float(t), float(min(BLOCK, hi - t))), lang, float(t))
+            got, _ = _words(model, pcm(audio_path, 16000, a, b - a), lang, a, beam)
             part.write_text(json.dumps(got), encoding="utf-8")
         words += got
-        log.info(f"  {(min(t + BLOCK, hi) - lo) / 60:.0f}/{(hi - lo) / 60:.0f} min heard")
+        done += b - a
+        log.info(f"  {done / 60:.0f}/{total / 60:.0f} min heard")
     if not words:
         raise RuntimeError("no speech found in this video")
-    data = {"language": lang, "lo": lo, "hi": hi, "words": words}
+    data = {"language": lang, "lo": lo, "hi": hi, "words": words, "windows": [list(w) for w in windows or []]}
     cache.write_text(json.dumps(data), encoding="utf-8")
     for p in workdir.glob("transcript_*.json"):
         p.unlink()

@@ -77,8 +77,28 @@ def publish_one(post_id, settings) -> str:
         fn = fns.get(p["platform"])
         if not fn:
             raise Permanent(f"no publisher for {p['platform']}")
-        res = fn(job_for(c), settings)
+        try:
+            res = fn(job_for(c), settings)
+        except (Retryable, Ambiguous, Permanent):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # ONLY a dropped connection while SIGNING IN (nothing sent yet) may be retried. A dropped connection
+            # anywhere else may come after the video arrived: retrying made a duplicate upload on 2026-11-19
+            # (CLIP0016 twice on YouTube) → "maybe posted", a human checks the channel first.
+            if _is_network(exc) and _before_upload(exc):
+                raise Retryable(f"network error while signing in: {str(exc)[:300]}", 5) from exc
+            if _is_network(exc):
+                raise Ambiguous(f"connection dropped during the upload: {str(exc)[:300]}") from exc
+            raise
     except Retryable as exc:
+        if not online():
+            # PC just woke up / Wi-Fi down: this try does not count, look again in 10 minutes
+            nxt = (datetime.now() + timedelta(minutes=10)).isoformat(timespec="seconds")
+            db.update_post(post_id, status="failed", attempts=max(0, attempts - 1), last_error=str(exc)[:900],
+                           next_try=nxt)
+            db.event("warning", c["clip_id"], "publish", f"{p['platform']}: no internet, next try {nxt[11:16]}")
+            _clip_back(c["clip_id"])
+            return "failed"
         if attempts >= int(settings.get("posting_max_attempts", 3)):
             return _manual(p, f"gave up after {attempts} tries: {exc}")
         nxt = (datetime.now() + timedelta(minutes=exc.wait_minutes * attempts)).isoformat(timespec="seconds")
@@ -95,6 +115,40 @@ def publish_one(post_id, settings) -> str:
     return "posted"
 
 
+NETWORK_WORDS = ("connectionpool", "connection aborted", "connection reset", "max retries exceeded",
+                 "name resolution", "getaddrinfo", "timed out", "temporarily unavailable", "network is unreachable",
+                 "remotedisconnected", "connecterror", "transporterror")
+
+
+def _is_network(exc) -> bool:
+    import socket
+    try:
+        import requests
+        if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+            return True
+    except ImportError:
+        pass
+    if isinstance(exc, (socket.timeout, socket.gaierror, ConnectionError, TimeoutError)):
+        return True
+    txt = f"{type(exc).__name__} {exc}".lower()
+    return any(w in txt for w in NETWORK_WORDS)
+
+
+def _before_upload(exc) -> bool:
+    """The error came from the sign-in step (token refresh), before any video byte was sent."""
+    txt = str(exc).lower()
+    return "oauth2.googleapis.com" in txt or "refresherror" in type(exc).__name__.lower()
+
+
+def online(host="www.google.com", port=443, timeout=4) -> bool:
+    import socket
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
 def _manual(p, msg):
     db = get_db()
     db.update_post(p["id"], status="needs_manual", last_error=msg[:900])
@@ -106,6 +160,11 @@ def _manual(p, msg):
 def _clip_back(cid):
     """Nothing published yet → the clip is plain "approved" again (can still be remade / rejected)."""
     db = get_db()
+    c = db.get_clip(cid)
+    # only a clip that is still "posting" goes back: a clip you rejected / sent to remake while an upload was
+    # running must stay that way (2026-11-20: a rejected clip was revived like this and posted again)
+    if c and c["status"] != "posting":
+        return
     if not any(x["status"] in ("posted", "publishing") for x in db.posts() if x["clip_id"] == cid):
         db.update_clip(cid, status="approved")
 

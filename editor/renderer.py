@@ -58,10 +58,48 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     cuts, faces, n_src = effects.analyse(src)
     lay = effects.plan_layout(layout, cuts, faces, n_src)
     P = resolve_preset(presets, preset_name, lay["layout"])
+    if P["layout"] == "facecam_or_card":                 # face on top when a facecam is found, else card
+        # face on top only for a clear, big facecam (small corner cams, e.g. CarryMinati, get locked onto game
+        # faces in cutscenes → the whole frame on a black card instead, like the top clips of such streams)
+        cam = lay.get("cam")
+        big = (cam is not None and lay.get("cam_kind") == "big"
+               and float(cam[2]) >= float(P.get("min_cam_face", 0.09))) or (layout == "split" and cam is not None)
+        P["layout"] = "split" if (lay["layout"] == "split" and big) else "card"
+    if lay.get("layout") == "split":
+        lay["cam_mult"], lay["cam_min"] = float(P.get("cam_face_mult", 3.3)), float(P.get("cam_min_crop", 0.28))
+        if P["layout"] == "split":
+            sp = presets["presets"].get("facecam_top", {})
+            P["title_cfg"] = sp.get("title_cfg", P.get("title_cfg"))
+            P["caption_style"] = presets["caption_styles"][P.get("split_captions") or sp.get("captions", P["captions"])]
     if P["layout"] != lay["layout"] and P["layout"] in ("split", "full"):
         lay = effects.plan_layout(P["layout"], cuts, faces, n_src)
     W, H = P["resolution"]
+    from core.media import probe as _probe
+    _vs = next(x for x in _probe(src)["streams"] if x["codec_type"] == "video")
+    _n, _d = (_vs.get("avg_frame_rate") or _vs.get("r_frame_rate") or "30/1").split("/")
+    SRC_FPS = float(_n) / max(float(_d), 1.0) or 30.0
     FPS = P.get("fps", 30)
+    if FPS == "source":                                  # 60 fps gameplay stays 60 fps (smoother)
+        from core.media import probe as _probe
+        vs0 = next(x for x in _probe(src)["streams"] if x["codec_type"] == "video")
+        num, den = (vs0.get("avg_frame_rate") or vs0.get("r_frame_rate") or "30/1").split("/")
+        FPS = 60 if float(num) / max(float(den), 1) >= 50 else 30
+    title_band = None
+    if P["layout"] == "card":
+        from editor import titleband
+        vh = int(round(W * 9 / 16))
+        vy = int(H * P.get("card_video_y", 0.5)) - vh // 2
+        bg = np.zeros((H, W, 3), np.uint8)
+        tb = P.get("title_cfg", {})
+        band = titleband.render(hook, W, **tb) if hook else None
+        if band is not None:
+            titleband.paste(bg, band, max(40, vy - band.shape[0] - int(P.get("title_gap", 34))))
+        n_fx = max(n_src, 1)
+        lay = {"layout": "card", "bg": bg, "vy": vy, "vh": vh, "fx": np.full(n_fx, 0.5), "fy": np.full(n_fx, 0.5),
+               "fs": np.full(n_fx, 0.1)}
+    elif P.get("title_cfg") and hook:
+        from editor import titleband
+        title_band = titleband.render(hook, W, **P["title_cfg"])
     mo, so = P["motion_cfg"], P["sound_cfg"]
 
     aud = pcm(src, SR, channels=2)
@@ -115,13 +153,19 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     cs_style = P["caption_style"]
     cw = cap.CaptionWriter(cs_style, W, H)
     top_h = int(H * P.get("top_panel_ratio", 0.55))
-    cap_y = top_h if (cs_style["position_y"] == "seam" and lay["layout"] == "split") else (
+    cam_top = bool(P.get("cam_on_top")) and lay["layout"] == "split"
+    seam = (H - top_h) if cam_top else top_h
+    cap_y = seam if (cs_style["position_y"] == "seam" and lay["layout"] == "split") else (
         cs_style["position_y"] if isinstance(cs_style["position_y"], (int, float)) else int(H * 0.59))
-    if P["hook_style"].get("enabled") and hook:
-        cw.add_hook(hook, P["hook_style"]["position_y"], P["hook_style"]["seconds"])
+    if lay["layout"] == "card":
+        cap_y = lay["vy"] + lay["vh"] + int(P.get("card_caption_gap", 150))
+    # face on top: hook + closing text go into the gameplay just under the captions, never over the face
+    hook_y = seam + int(H * 0.15) if cam_top else P["hook_style"].get("position_y", 330)
+    if P["hook_style"].get("enabled") and hook and not P.get("title_cfg"):
+        cw.add_hook(hook, hook_y, P["hook_style"]["seconds"])
     if voice and voice.get("take_text"):        # closing comment as on-screen text (no second voice)
         for t0, t1, part in voiceover.text_parts(voice["take_text"], clip_dur):
-            cw.add_hook(part, P["hook_style"]["position_y"], t1 - t0, start=t0)
+            cw.add_hook(part, hook_y, t1 - t0, start=t0)
     cw.add_chunks(cap.make_chunks(w_out, cs_style["max_words"], cs_style["max_chars"]), cap_y)
     ass_name = f"{name}.ass"
     cw.save(workdir / ass_name)
@@ -131,7 +175,7 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     for s, nf, fo in timeline:
         src_t[fo: fo + nf] = s + np.arange(nf) / FPS
     env_out = env[np.clip((src_t * 10).astype(int), 0, len(env) - 1)]
-    punches, shakes = gen.punch_points(env_out, FPS, clip_dur, main_start, bool(cold))
+    punches, shakes = gen.punch_points(env_out, FPS, clip_dur, main_start, bool(cold), mo.get("punch_every_s", 4))
 
     # ---- audio
     n = int(round(dur * SR))
@@ -205,7 +249,8 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     for t in shakes:
         put(sfx_lib.get("boom", 0.7), t, so["sfx_boom_on_shake"])
 
-    music, music_name = sound.music_for(max(dur - main_start, 1.0), settings["music_mode"], variant, music_mood)
+    music, music_name = sound.music_for(max(dur - main_start, 1.0), so.get("music_mode") or settings["music_mode"],
+                                        variant, music_mood)
     mus = np.zeros((n, 2))
     if music is not None:
         m0 = int(main_start * SR)
@@ -226,7 +271,7 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     ex = P["export_cfg"]
     out_path = out_dir / f"{name}.mp4"
     look = effects.lut_filter(P["grade_cfg"], workdir)
-    log.info(f"{name}: layout {lay['layout']}, {dur:.1f}s, {len(main)} part(s), cold open {'yes' if cold else 'no'}, "
+    log.info(f"{name}: layout {lay['layout']}, {FPS} fps (source {SRC_FPS:.0f}), {dur:.1f}s, {len(main)} part(s), cold open {'yes' if cold else 'no'}, "
              f"{len(punches)} punch-ins, music {music_name}, LUT {P['grade_cfg'].get('lut') or 'none'}, "
              f"drop overlay {drop_ov.name if drop_ov else 'none'}")
     enc = subprocess.Popen(
@@ -241,8 +286,11 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
     last_img = None
     try:
         for si, (s, nf, fo) in enumerate(timeline):
-            dec = subprocess.Popen(["ffmpeg", "-v", "error", "-nostdin", "-ss", f"{s:.3f}", "-i", str(src),
-                                    "-frames:v", str(nf), "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+            # fps filter: the source may be 60 fps while we output 30 (or the reverse). Without it every output
+            # frame took the NEXT source frame → half-speed "slow motion" picture over normal-speed sound (2026-11-19)
+            dec = subprocess.Popen(["ffmpeg", "-v", "error", "-nostdin", "-ss", f"{s:.3f}", "-i", str(src), "-an",
+                                    "-vf", f"fps={FPS}", "-frames:v", str(nf), "-f", "rawvideo", "-pix_fmt", "bgr24",
+                                    "-"],
                                    stdout=subprocess.PIPE)
             if probe_w is None:
                 from core.media import probe
@@ -258,7 +306,7 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
                 frame = last if last is not None else np.zeros((probe_h, probe_w, 3), np.uint8)
                 k = fo + j
                 t = k / FPS
-                sf = min(int(round(src_t[k] * FPS)), len(lay["fx"]) - 1)
+                sf = min(int(round(src_t[k] * SRC_FPS)), len(lay["fx"]) - 1)   # analysis runs on source frames
                 z = seg_zoom * (1 + mo["slow_push"] * j / max(nf, 1))
                 for tp, _ in punches:
                     d = t - tp
@@ -276,8 +324,11 @@ def render_clip(src: Path, words_src: list, cs: float, ce: float, hook: str, pre
                         dx += mo["shake_px"] * amp * jitter[k, 0]
                         dy += mo["shake_px"] * amp * jitter[k, 1]
                         rot += mo["shake_rotate_deg"] * amp * jitter[k, 2]
-                img = effects.render_frame(frame, lay, sf, z, dx, dy, rot, W, H, P.get("top_panel_ratio", 0.55))
+                img = effects.render_frame(frame, lay, sf, z, dx, dy, rot, W, H, P.get("top_panel_ratio", 0.55),
+                                           bool(P.get("cam_on_top")))
                 img = grade(img)
+                if title_band is not None:               # facecam_top: the title stays on the seam
+                    titleband.paste(img, title_band, int(P.get("title_y", H - top_h)) - title_band.shape[0] // 2)
                 if cold:
                     img = effects.transition(img, t - main_start,
                                              mo.get("flash_transition", True) and drop_ov is None,

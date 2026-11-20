@@ -46,7 +46,9 @@ def check(path, expect_w=1080, expect_h=1920, min_dur=12, max_dur=90, lufs_targe
         if len(raw) == 108 * 192:
             f = np.frombuffer(raw, np.uint8)
             frames.append(f)
-            if f.mean() < 12:
+            # judge the middle of the frame: the "card" layout is black above/below the video on purpose
+            mid = f.reshape(192, 108)[60:122]
+            if mid.mean() < 12:
                 dark += 1
     if dark >= 3:
         issues.append(f"{dark}/8 sampled frames are black")

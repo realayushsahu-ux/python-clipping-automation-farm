@@ -122,6 +122,14 @@ def remake_clip(clip_id, settings, repackage=True):
     return db.get_clip(clip_id)
 
 
+def needs_voice_retry(pkg: dict, voice) -> bool:
+    """True when the clip would go out with no spoken intro although the AI could write one:
+    once per clip (pkg["_voice_retry"]), never for offline/fake packages."""
+    if pkg.get("_offline") or pkg.get("_voice_retry"):
+        return False
+    return not (voice and "intro" in voice)
+
+
 def _used_voices(work, cid) -> list:
     """Narrator lines of the other clips of this video (so every clip says something new)."""
     out = []
@@ -250,10 +258,14 @@ def _run(v, settings):
     if total:
         hi = min(hi, total)
     lang = v.get("language") or settings["language"]
-    tr = transcript.scan(audio, lo, hi, work, settings, None if lang == "auto" else lang)
-    db.update_video(vid, language=tr["language"])
     loud = signals.relative(signals.loudness(audio, work))
     chat = dl.chat_rate(url, info, work)
+    windows = None
+    if (hi - lo) / 60 > float(settings.get("focus_scan_over_minutes", 150)):
+        # a 10-hour stream cannot be fully transcribed on a CPU in time: listen where chat/voice spiked
+        windows = signals.focus_windows(loud, chat, lo, hi, budget_s=float(settings.get("focus_scan_minutes", 90)) * 60)
+    tr = transcript.scan(audio, lo, hi, work, settings, None if lang == "auto" else lang, windows)
+    db.update_video(vid, language=tr["language"])
 
     # ---------------------------------------------------------------- pick
     db.update_video(vid, status="analyzing", stage_detail="moments")
@@ -329,11 +341,43 @@ def _make_clip(cid, m, info, lang, url, work, src_dir, settings, presets, v):
             pkg_file.write_text(json.dumps(pkg, indent=1, ensure_ascii=False), encoding="utf-8")
         for n in pkg.get("voice_notes") or []:
             log.info(f"{cid}: {n}")
+        for n in voiceover.recheck_saved(pkg):          # older packages: today's intro rules apply too
+            log.info(f"{cid}: {n}")
         voice = voiceover.prepare(pkg, settings)
+        if settings.get("voice_commentary") and needs_voice_retry(pkg, voice) and voiceover.available():
+            # no spoken intro survived (too long / sounded like a repost): ONE small AI call for new lines,
+            # because a clip without our narrator is just someone else's footage (~Rs 0.2, once per clip)
+            from ai.caption_generator import voice_lines
+            pkg["_voice_retry"] = True
+            try:
+                again = voice_lines(pkg, info, text, settings, _used_voices(work, cid))
+            except Exception as exc:  # noqa: BLE001 - the clip still renders without a narrator
+                again = {}
+                log.warning(f"{cid}: new narrator lines failed: {str(exc)[:150]}")
+            if again.get("voice_intro"):
+                pkg["voice_intro"], pkg["voice_intro_alts"] = again["voice_intro"], again.get("voice_intro_alts", [])
+                if not pkg.get("voice_take") and again.get("voice_take"):
+                    pkg["voice_take"], pkg["voice_take_alts"] = again["voice_take"], again.get("voice_take_alts", [])
+                voice = voiceover.prepare(pkg, settings)
+            for n in again.get("voice_notes") or []:
+                log.info(f"{cid}: retry {n}")
+            log.info(f"{cid}: narrator retry → {'intro ok' if voice and 'intro' in voice else 'still no intro'}")
+            pkg_file.write_text(json.dumps(pkg, indent=1, ensure_ascii=False), encoding="utf-8")
 
     variant = int(cid[4:]) if cid[4:].isdigit() else 0
     max_len = clip_max_for(settings, m.get("kind"))
-    res = render_clip(src, words, cs, cs + length, pkg.get("hook") or m.get("hook_text", ""), presets, settings,
+    on_screen = pkg.get("hook") or m.get("hook_text", "")
+    if presets["presets"].get(settings["editing_preset"], {}).get("title_cfg") and pkg.get("banner"):
+        from ai import vision
+        seen = vision.check_title(settings, src, cs, length, pkg, text)
+        if seen:
+            log.info(f"{cid}: frames show: {seen['seen'][:120]} | title "
+                     f"{'REWRITTEN → ' + seen['title'] if seen['changed'] else 'ok: ' + seen['title']}")
+            pkg["banner"], pkg["seen"] = seen["title"], seen["seen"]
+            pkg_file.write_text(json.dumps(pkg, indent=1, ensure_ascii=False), encoding="utf-8")
+    if presets["presets"].get(settings["editing_preset"], {}).get("title_cfg"):
+        on_screen = pkg.get("banner") or re.sub(r"\s#\S+", "", pkg.get("youtube_title") or "") or on_screen
+    res = render_clip(src, words, cs, cs + length, on_screen, presets, settings,
                       work / "render", cid, work / "render", variant=variant,
                       preset_name=settings["editing_preset"], layout=v.get("layout") or "auto", max_seconds=max_len,
                       voice=voice)

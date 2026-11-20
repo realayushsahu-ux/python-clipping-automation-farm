@@ -41,6 +41,54 @@ def relative(values, window=120) -> np.ndarray:
     return v - np.median(win[:, ::4], axis=1)
 
 
+def focus_windows(loud_rel, chat, lo, hi, budget_s=5400, win_s=180, pre_s=120, per_hour_share=0.3):
+    """For very long streams: the stretches worth transcribing, [(start, end)] sorted.
+    Score per second = chat spike (messages vs. the stream's median, from the 5 s chat buckets) + how far
+    the streamer's voice is above its 2-minute median. The best seconds become windows that start
+    `pre_s` before the peak (the build-up) and last `win_s`; no hour takes more than `per_hour_share`
+    of the budget, so the whole stream is covered, not one loud hour."""
+    n = int(hi - lo)
+    if n <= 0:
+        return []
+    score = np.zeros(n, dtype=np.float32)
+    lr = np.asarray(loud_rel, dtype=np.float32)
+    if len(lr):
+        seg = lr[int(lo): int(lo) + n]
+        score[: len(seg)] += np.clip(seg, 0, 20) / 4.0
+    if chat:
+        c = np.asarray(chat, dtype=np.float32)
+        base = float(np.median(c[c > 0])) if (c > 0).any() else 1.0
+        per_s = np.repeat(c / max(base, 1.0), 5)[int(lo): int(lo) + n]
+        score[: len(per_s)] += np.clip(per_s - 1.0, 0, 8)
+    # smooth over 10 s so one shout does not beat a real moment
+    k = np.ones(10, dtype=np.float32) / 10
+    score = np.convolve(score, k, mode="same")
+    order = np.argsort(-score)
+    taken, used, per_hour = [], 0, {}
+    cap = budget_s * per_hour_share
+    for i in order:
+        if used >= budget_s or score[i] <= 0:
+            break
+        a = max(0, int(i) - pre_s)
+        b = min(n, a + win_s)
+        if any(a < y and b > x for x, y in taken):
+            continue
+        h = (lo + a) // 3600
+        if per_hour.get(h, 0) + (b - a) > cap:
+            continue
+        taken.append((a, b))
+        used += b - a
+        per_hour[h] = per_hour.get(h, 0) + (b - a)
+    taken.sort()
+    merged = []
+    for a, b in taken:                       # touching windows become one
+        if merged and a <= merged[-1][1] + 5:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return [(lo + a, lo + b) for a, b in merged]
+
+
 def transcript_lines(words, loud_rel, chat, line_seconds=8, loud_db=8.0):
     """~8 s transcript lines with [LOUD +NdB] / [CHAT xN] markers, for the AI picker."""
     lines, cur, start = [], [], None

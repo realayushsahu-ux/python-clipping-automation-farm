@@ -54,6 +54,15 @@ class Fake:
 
 
 def main():
+    # 0. (2026-11-19) Instagram copy stays under IG_MAX_MB: 48/58 MB copies got ProcessingFailedError
+    for secs in (10, 26, 38, 46, 57, 60, 90):
+        kb = instagram.ig_video_kbps(secs)
+        assert 2500 <= kb <= 8000, (secs, kb)
+        if kb > 2500:
+            assert (kb + 128) * secs / 8 / 1000 <= instagram.IG_MAX_MB, (secs, kb)
+    assert instagram.ig_video_kbps(26) == 8000 and instagram.ig_video_kbps(0) == 8000
+    assert instagram.ig_video_kbps(57) < 5000
+
     tmp = Path(tempfile.mkdtemp())
     dbmod._local.db = DB(tmp / "t.db")
     outs.READY = S.READY_DIR = tmp / "ready"
@@ -83,7 +92,7 @@ def main():
     # 1. switch off → nothing happens
     assert publisher.publish_due(st) == {"disabled": True} and yt.calls == ig.calls == 0
     S.sync(io, st)
-    assert "posting off" in io.read(T.READY)[1][3]
+    assert "posting off" in io.read(T.READY)[1][5]
 
     # 2. switch on (Settings tab) → due posts go out, IG fails once (retry later)
     srows = io.read(T.SETTINGS)
@@ -155,6 +164,52 @@ def main():
     assert publisher.PUBLISHERS["youtube"].calls == 0, "a late post must not go out at a random time"
     assert db.get_clip(late)["post_time"] > datetime.now().strftime("%Y-%m-%d %H:%M")
     assert all(p["scheduled_at"] == db.get_clip(late)["post_time"] for p in db.posts() if p["clip_id"] == late)
+
+    # 6c. (2026-11-19) PC woke from sleep with no internet: a dropped connection (even inside the YouTube
+    #     sign-in refresh) is a retry, and tries made while offline never use up posting_max_attempts
+    import requests
+    drop = requests.ConnectionError("HTTPSConnectionPool(host='oauth2.googleapis.com', port=443): Max retries")
+    off = make_clip(db, 4, later)
+    queue.step(st)
+    pid = next(p["id"] for p in db.posts() if p["clip_id"] == off and p["platform"] == "youtube")
+    publisher.PUBLISHERS = {"youtube": Fake(drop, drop, drop, drop, drop, "ok"), "instagram": Fake()}
+    real_online = publisher.online
+    publisher.online = lambda: False
+    for _ in range(5):
+        assert publisher.publish_one(pid, st) == "failed"
+        assert db.get_post(pid)["attempts"] == 0, "offline tries must not count"
+    publisher.online = lambda: True
+    assert publisher.publish_one(pid, st) == "posted", db.get_post(pid)
+    # rejected while an upload was failing → stays rejected, never revived (2026-11-20)
+    rj = make_clip(db, 6, later)
+    queue.step(st)
+    pid3 = next(p["id"] for p in db.posts() if p["clip_id"] == rj and p["platform"] == "youtube")
+
+    class RejectMidway(Fake):
+        def __call__(self, job, settings):
+            db.update_clip(rj, status="rejected")        # the user rejects it during the upload
+            raise Retryable("network down", 10)
+    publisher.PUBLISHERS = {"youtube": RejectMidway(), "instagram": Fake()}
+    publisher.online = lambda: True
+    publisher.publish_one(pid3, st)
+    assert db.get_clip(rj)["status"] == "rejected", db.get_clip(rj)["status"]
+    queue.plan_posts(st)
+    assert all(p["status"] == "cancelled" for p in db.posts() if p["clip_id"] == rj and p["platform"] == "youtube")
+    publisher.online = real_online
+    assert publisher._is_network(drop) and not publisher._is_network(ValueError("bad title"))
+    # ... but a connection dropped DURING the upload may have published it: never retried (duplicate on
+    # 2026-11-19), it waits for a human as "maybe posted"
+    mid = make_clip(db, 5, later)
+    queue.step(st)
+    pid2 = next(p["id"] for p in db.posts() if p["clip_id"] == mid and p["platform"] == "youtube")
+    yt = Fake(ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host"), "ok")
+    publisher.PUBLISHERS = {"youtube": yt, "instagram": Fake()}
+    publisher.online = lambda: True
+    assert publisher.publish_one(pid2, st) == "needs_manual" and yt.calls == 1
+    assert "MAYBE POSTED" in db.get_post(pid2)["last_error"]
+    publisher.publish_due(st)
+    assert yt.calls == 1, "a maybe-posted upload must never be sent again automatically"
+    publisher.online = real_online
 
     # 7. YouTube request body: title ≤100, ≤15 hashtags in the description, tags ≤ 450 chars, Gaming
     body = youtube_shorts.build_body({**PKG, "clip_id": "CLIP9", "youtube_title": "x" * 150}, st)

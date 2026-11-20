@@ -61,20 +61,44 @@ def _check(r, step, published_step=False):
     raise Permanent(msg)
 
 
+IG_MAX_MB = 35       # every upload <= 38 MB went through; 48 MB and 58 MB copies got ProcessingFailedError
+
+
+def ig_video_kbps(duration_s: float, max_mb: float = IG_MAX_MB) -> int:
+    """Video bitrate (kbps) so the copy stays under max_mb: 8000 for short clips, less for long ones
+    (Instagram re-encodes Reels to well under 5 Mbps anyway, so nothing visible is lost)."""
+    if not duration_s or duration_s <= 0:
+        return 8000
+    budget = max_mb * 8_000 / duration_s - 128 - 150          # minus audio + container overhead
+    return int(max(2500, min(8000, budget)))
+
+
+def _duration(video: Path) -> float:
+    import subprocess
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                            str(video)], capture_output=True, text=True, timeout=60)
+        return float(r.stdout.strip() or 0)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0.0
+
+
 def ig_copy(video: Path) -> Path:
     """An Instagram-spec copy of the clip (Reels refuse our 15 Mbps / 192 kbps master with
-    "ProcessingFailedError"): H.264 High ≤10 Mbps, AAC 128 kbps 48 kHz, faststart.
-    Kept in storage/_system/instagram and reused while it is newer than the clip."""
+    "ProcessingFailedError"): H.264 High ≤8 Mbps and at most IG_MAX_MB, AAC 128 kbps 48 kHz, faststart.
+    Kept in storage/_system/instagram and reused while it is newer than the clip and small enough."""
     import subprocess
     from core.paths import SYSTEM
     out = SYSTEM / "instagram" / f"{video.stem}_ig.mp4"
-    if out.is_file() and out.stat().st_mtime >= video.stat().st_mtime and out.stat().st_size > 0:
+    if (out.is_file() and out.stat().st_mtime >= video.stat().st_mtime
+            and 0 < out.stat().st_size <= IG_MAX_MB * 1_000_000):
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".part.mp4")
+    kb = ig_video_kbps(_duration(video))
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(video),
            "-c:v", "libx264", "-preset", "medium", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
-           "-r", "30", "-b:v", "8M", "-maxrate", "10M", "-bufsize", "16M", "-g", "60",
+           "-r", "30", "-b:v", f"{kb}k", "-maxrate", f"{int(kb * 1.25)}k", "-bufsize", f"{kb * 2}k", "-g", "60",
            "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(tmp)]
     try:
         subprocess.run(cmd, capture_output=True, check=True, timeout=900)

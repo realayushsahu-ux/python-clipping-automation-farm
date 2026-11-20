@@ -66,7 +66,8 @@ def refresh_layout(io):
     have = set(io.tabs())
     for name, spec in T.TABS.items():
         if name in have:
-            io.format_tab(name, spec.get("widths"), spec.get("dropdowns"))
+            io.format_tab(name, spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
+    io.arrange(T.ORDER, T.TAB_COLORS)
 
 
 def ensure_tabs(io, settings):
@@ -75,7 +76,7 @@ def ensure_tabs(io, settings):
     made = []
     for name, spec in T.TABS.items():
         if name not in have:
-            io.add_tab(name, spec["headers"], spec.get("widths"), spec.get("dropdowns"))
+            io.add_tab(name, spec["headers"], spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
             made.append(name)
             if name == T.SETTINGS:
                 rows = [spec["headers"]]
@@ -85,6 +86,8 @@ def ensure_tabs(io, settings):
                     rows.append([key, "" if v is None else str(v), meaning])
                 io.write_all(name, rows)
     _add_new_settings(io, settings, have)
+    if made:
+        io.arrange(T.ORDER, T.TAB_COLORS)
     return made
 
 
@@ -159,6 +162,23 @@ def sync_video_input(io, settings):
             c = col.get(name)
             if c is not None and (row[c] if c < len(row) else "") != str(val):
                 cells.append((r, c + 1, val))
+    # videos added outside the sheet (main.py process, or by Claude in chat) get a row too, so Video Input
+    # is the complete list of every video the farm ever worked on
+    n = len(rows)
+    for v in sorted(db.videos(), key=lambda v: v.get("created_at") or ""):
+        if v["video_id"] in seen:
+            continue
+        n += 1
+        made = len(db.clips(v["video_id"], "ready", "approved", "scheduled", "posting", "posted"))
+        want = {"URL": v["url"], "Video ID": v["video_id"], "Status": v["status"], "Title": v.get("title") or "",
+                "Clips Made": str(made) if v["status"] == "done" or made else "",
+                "Added At": _short(v["created_at"]), "Updated At": _short(v["updated_at"]),
+                "Message": "added outside the sheet"}
+        for name, val in want.items():
+            c = col.get(name)
+            if c is not None:
+                cells.append((n, c + 1, val))
+        db.update_video(v["video_id"], sheet_row=n)
     io.update_cells(T.VIDEO_INPUT, cells)
     return {"new": new, "cells": len(cells)}
 
@@ -269,13 +289,13 @@ def write_ready(io, settings, notes):
             status = "needs you (see Notes)"
         elif c["status"] == "approved" and mine and not settings.get("posting_enabled", False):
             status = "scheduled (posting off)"
-        rows.append([c["clip_id"], c.get("post_time") or "", approve, status, folder_link(settings, c["clip_id"]),
-                     ",".join(p.get("platforms") or settings.get("default_platforms") or []),
-                     c.get("hook") or "", c.get("title") or "", p.get("instagram_caption", c.get("caption") or ""),
+        rows.append([c["clip_id"], folder_link(settings, c["clip_id"]), c.get("title") or "",
+                     c.get("post_time") or "", approve, status, notes.get(c["clip_id"], ""),
+                     (p.get("qc") or {}).get("duration", ""), p.get("instagram_caption", c.get("caption") or ""),
                      " ".join(p.get("hashtags") or []), p.get("youtube_description", c.get("description") or ""),
-                     p.get("pin_comment", ""), (p.get("qc") or {}).get("duration", ""), _num(c.get("score")),
-                     c.get("kind") or "", c.get("creator") or p.get("creator") or "", c["video_id"],
-                     notes.get(c["clip_id"], "")])
+                     p.get("pin_comment", ""), c.get("hook") or "",
+                     ",".join(p.get("platforms") or settings.get("default_platforms") or []), _num(c.get("score")),
+                     c.get("kind") or "", c.get("creator") or p.get("creator") or "", c["video_id"]])
     io.write_all(T.READY, rows)
     return len(rows) - 1
 
@@ -297,22 +317,50 @@ def write_processing(io):
     io.write_all(T.PROCESSING, rows)
 
 
-def write_schedule(io, settings):
-    """Every unpublished post (one row per clip × platform), plus clips still waiting for your yes."""
+def _day(ts):
+    """'2026-11-20 20:00' -> 'Today 8:00 PM' / 'Tomorrow 10:00 AM' / 'Sat 22 Nov 6:00 PM'."""
+    try:
+        t = datetime.strptime(ts, "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return ""
+    d = (t.date() - datetime.now().date()).days
+    day = {0: "Today", 1: "Tomorrow", -1: "Yesterday"}.get(d, t.strftime("%a %d %b"))
+    return f"{day} {t.strftime('%I:%M %p').lstrip('0')}"
+
+
+def schedule_items(settings):
+    """One item per clip that is still to be posted: (time, clip, platforms, status, problem)."""
     db = get_db()
-    rows = [T.TABS[T.SCHEDULE]["headers"]]
-    items = []
-    names = {"scheduled": "scheduled" if settings.get("posting_enabled", False) else "scheduled (posting off)",
-             "publishing": "publishing…", "failed": "failed, will retry",
-             "needs_manual": "needs you: type posted or retry"}
+    rank = {"needs_manual": 0, "failed": 1, "publishing": 2, "scheduled": 3}
+    names = {"scheduled": "✅ scheduled" if settings.get("posting_enabled", False) else "⏸ scheduled (posting off)",
+             "publishing": "⏳ posting now…", "failed": "⚠ failed, will retry",
+             "needs_manual": "❗ needs you (see Problem)"}
+    by = {}
     for p in db.posts("scheduled", "publishing", "failed", "needs_manual"):
-        c = db.get_clip(p["clip_id"]) or {}
-        items.append([p.get("scheduled_at") or "", p["clip_id"], p["platform"], names[p["status"]], p["attempts"],
-                      (p.get("last_error") or "")[:300], c.get("title") or ""])
+        by.setdefault(p["clip_id"], []).append(p)
+    items = []
+    for cid, ps in by.items():
+        c = db.get_clip(cid) or {"clip_id": cid}
+        worst = min(ps, key=lambda p: rank[p["status"]])
+        problem = " | ".join(f"{p['platform']}: {(p.get('last_error') or '')[:150]}"
+                             for p in ps if p["status"] in ("failed", "needs_manual") and p.get("last_error"))
+        items.append((min(p.get("scheduled_at") or "9999" for p in ps), c, sorted(p["platform"] for p in ps),
+                      names[worst["status"]], problem))
     for c in db.clips(None, "ready"):
-        for pl in queue.platforms_of(c, settings):
-            items.append([c.get("post_time") or "", c["clip_id"], pl, "waiting approval", 0, "", c.get("title") or ""])
-    rows += sorted(items, key=lambda r: (r[0] or "9999", r[1], r[2]))
+        items.append((c.get("post_time") or "9999", c, sorted(queue.platforms_of(c, settings)),
+                      "✋ waiting for your yes (Ready to Post)", ""))
+    return sorted(items, key=lambda x: (x[0], x[1].get("clip_id", "")))
+
+
+def write_schedule(io, settings):
+    """Every clip still to be posted, one row each, next post first."""
+    rows = [T.TABS[T.SCHEDULE]["headers"]]
+    pretty = {"youtube": "YouTube", "instagram": "Instagram"}
+    for when, c, pls, status, problem in schedule_items(settings):
+        when = "" if when == "9999" else when
+        rows.append([when, _day(when), c.get("clip_id", ""), c.get("title") or "",
+                     " + ".join(pretty.get(x, x) for x in pls), status, folder_link(settings, c.get("clip_id", "")),
+                     problem])
     io.write_all(T.SCHEDULE, rows)
 
 
@@ -342,11 +390,10 @@ def write_posted(io, settings):
     rows = [T.TABS[T.POSTED]["headers"]]
     for p in sorted(db.posts("posted"), key=lambda p: p.get("posted_at") or "", reverse=True):
         c = db.get_clip(p["clip_id"]) or {}
-        ext = p.get("external_id") or ""
-        s = stats.get((p["platform"], ext)) or stats_url.get(p.get("url") or "-") or {}
-        rows.append([_short(p.get("posted_at")), p["clip_id"], p["platform"], p.get("url") or "",
-                     folder_link(settings, p["clip_id"]), "posted by hand" if ext == "manual" else ext,
-                     c.get("title") or "", _n(s.get("views")), _n(s.get("likes")), _n(s.get("comments"))])
+        s = stats.get((p["platform"], p.get("external_id") or "")) or stats_url.get(p.get("url") or "-") or {}
+        rows.append([_short(p.get("posted_at")), p["clip_id"], c.get("title") or "", p["platform"],
+                     p.get("url") or "", _n(s.get("views")), _n(s.get("likes")), _n(s.get("comments")),
+                     folder_link(settings, p["clip_id"])])
     io.write_all(T.POSTED, rows)
 
 
@@ -476,6 +523,54 @@ def write_failed(io):
     io.write_all(T.FAILED, rows)
 
 
+# ------------------------------------------------------------------------------ START HERE
+GUIDE_HOW = [
+    ["HOW TO USE (3 steps)", ""],
+    ["1. Add a video", "Video Input tab: paste a YouTube/Twitch link in the URL column. That's all. "
+                       "The farm downloads it, finds the best moments and edits the clips by itself."],
+    ["2. Check the clips", "Ready to Post tab: click the Watch link to play a clip. "
+                           "Approve column: no = never post it, remake = edit it again. "
+                           "Post Time = when it goes out (write it like 2026-11-21 18:00)."],
+    ["3. Relax", "Clips post by themselves at their time to YouTube Shorts + Instagram Reels. "
+                 "Posting Schedule = what goes out next. Posted Reels = links + views of what went out."],
+    ["", ""],
+    ["COLOURS", ""],
+    ["Green tab / green column title", "You may type here."],
+    ["Blue tab", "Just look: the farm fills it every few minutes (typing there is overwritten)."],
+    ["Grey tab", "Advanced (work in progress, errors, trends, weekly audit). You can ignore these."],
+    ["", ""],
+    ["GOOD TO KNOW", ""],
+    ["Stop all posting", "Settings tab: posting_enabled = no  (yes = posting again)."],
+    ["Change the daily post times", "Settings tab: posting_times, e.g. 10:00,18:00,20:00,22:00,23:30 (India time)."],
+    ["Something is wrong", "Posting Schedule: the Status shows ❗ and the Problem column says why."],
+    ["Watch links", "Work only on the farm PC while the farm is running."],
+]
+
+
+def write_guide(io, settings):
+    """START HERE: what is happening now (top) + how to use the sheet."""
+    db = get_db()
+    items = schedule_items(settings)
+    nxt = next((x for x in items if x[0] != "9999"), None)
+    today = datetime.now().strftime("%Y-%m-%d")
+    posted_today = {p["clip_id"] for p in db.posts("posted") if (p.get("posted_at") or "").startswith(today)}
+    working = db.videos("new", "retry", "downloading", "transcribing", "analyzing", "editing")
+    stuck = [x for x in items if x[3].startswith("❗")]
+    on = settings.get("posting_enabled", False)
+    rows = [["CLIPPING FARM", f"updated {_now()}"],
+            ["RIGHT NOW", ""],
+            ["Posting", "✅ ON: clips post by themselves" if on
+             else "⏸ OFF: nothing is posted (Settings: posting_enabled)"],
+            ["Next post", f"{_day(nxt[0])}: {nxt[1].get('title') or nxt[1].get('clip_id')}" if nxt
+             else "nothing scheduled"],
+            ["Clips waiting to post", str(len(items))],
+            ["Clips posted today", str(len(posted_today))],
+            ["Videos being edited", ", ".join((v.get("title") or v["url"])[:60] for v in working) or "none"],
+            ["Needs your attention", f"❗ {len(stuck)} clip(s): see Posting Schedule" if stuck else "nothing 👍"],
+            ["", ""]] + GUIDE_HOW
+    io.write_all(T.GUIDE, rows)
+
+
 # -------------------------------------------------------------------------------- one sync
 def sync(io, settings):
     """One full sync. Returns a small report."""
@@ -489,6 +584,7 @@ def sync(io, settings):
     n_ready = write_ready(io, settings, edits.get("notes", {}))
     write_processing(io)
     write_schedule(io, settings)
+    write_guide(io, settings)
     write_posted(io, settings)
     write_failed(io)
     write_performance(io, settings)

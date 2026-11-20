@@ -1,12 +1,15 @@
 {
   "_help": "Editing presets. 'auto' picks streamer_split when a facecam is found, else game_full. Colors are #RRGGBB. Times in seconds. LUTs: assets/luts/*.cube (lut_strength 0-1, empty lut = off). drop_overlay: folders in assets/overlays/ screen-blended on the drop (empty list = white flash).",
-
   "presets": {
     "streamer_split": {
-      "description": "Reference reel Dcod99JqRXy: gameplay top, streamer face bottom, captions on the seam",
+      "description": "Streamer face panel on TOP (the reaction grabs attention first), gameplay below, captions on the seam (user 2026-11-19). cam_on_top false = gameplay top, face bottom (reference reel Dcod99JqRXy)",
       "layout": "split",
+      "cam_on_top": true,
       "top_panel_ratio": 0.55,
-      "resolution": [1080, 1920],
+      "resolution": [
+        1080,
+        1920
+      ],
       "fps": 30,
       "captions": "seam_typewriter",
       "hook_overlay": "typewriter_top",
@@ -17,16 +20,112 @@
     "game_full": {
       "description": "Reference reel DX7FlF_C7xD: full-frame cinematic crop following faces",
       "layout": "full",
-      "resolution": [1080, 1920],
+      "resolution": [
+        1080,
+        1920
+      ],
       "fps": 30,
       "captions": "center_typewriter",
       "hook_overlay": "typewriter_top",
       "motion": "smooth",
       "color_grade": "cinematic",
       "sound": "standard"
+    },
+    "card": {
+      "description": "Trending GTA 6 format (studied 2026-11-19: 'Airport reveal in gta 6' 924K likes, Mythpat map size, Speed can't steal any car): black page, one plain title line with an emoji, the WHOLE 16:9 frame uncut in the middle, big captions under it, stream audio only, 60 fps",
+      "layout": "card",
+      "resolution": [
+        1080,
+        1920
+      ],
+      "fps": "source",
+      "card_video_y": 0.47,
+      "title_cfg": {
+        "size": 60,
+        "color": [
+          255,
+          255,
+          255
+        ],
+        "font": "arialbd.ttf"
+      },
+      "title_gap": 36,
+      "card_caption_gap": 150,
+      "captions": "card_words",
+      "hook_overlay": "none",
+      "motion": "pro",
+      "color_grade": "natural",
+      "sound": "pro"
+    },
+    "facecam_top": {
+      "description": "Trending streamer format (Mythpat Ferrari, World's first 6 star, random NPC events): streamer face on top (34%), gameplay below, the title banner fixed on the seam for the whole clip, word captions under it, stream audio only, 60 fps",
+      "layout": "split",
+      "cam_on_top": true,
+      "top_panel_ratio": 0.66,
+      "resolution": [
+        1080,
+        1920
+      ],
+      "fps": "source",
+      "title_cfg": {
+        "size": 46,
+        "color": [
+          0,
+          0,
+          0
+        ],
+        "box": [
+          255,
+          255,
+          255
+        ],
+        "font": "arialbd.ttf",
+        "max_w_ratio": 0.78
+      },
+      "captions": "seam_words",
+      "hook_overlay": "none",
+      "motion": "pro",
+      "color_grade": "natural",
+      "sound": "pro",
+      "title_y": 652,
+      "min_cam_face": 0.06,
+      "cam_face_mult": 2.7,
+      "cam_min_crop": 0.19
+    },
+    "viral_auto": {
+      "description": "facecam_top when the stream has a facecam, else card",
+      "layout": "facecam_or_card",
+      "resolution": [
+        1080,
+        1920
+      ],
+      "fps": "source",
+      "card_video_y": 0.47,
+      "title_cfg": {
+        "size": 60,
+        "color": [
+          255,
+          255,
+          255
+        ],
+        "font": "arialbd.ttf"
+      },
+      "title_gap": 36,
+      "card_caption_gap": 150,
+      "captions": "card_words",
+      "hook_overlay": "none",
+      "motion": "pro",
+      "color_grade": "natural",
+      "sound": "pro",
+      "cam_on_top": true,
+      "top_panel_ratio": 0.66,
+      "title_y": 652,
+      "split_captions": "seam_words",
+      "min_cam_face": 0.06,
+      "cam_face_mult": 2.7,
+      "cam_min_crop": 0.19
     }
   },
-
   "caption_styles": {
     "seam_typewriter": {
       "position_y": "seam",
@@ -67,44 +166,188 @@
       "animation": "typewriter_pop",
       "uppercase": true,
       "censor_profanity": true
+    },
+    "card_words": {
+      "position_y": 1400,
+      "small_font": "Arial Black",
+      "small_size": 54,
+      "small_color": "#FFFFFF",
+      "keyword_font": "Arial Black",
+      "keyword_size": 64,
+      "keyword_color": "#FFD21F",
+      "keyword_italic": false,
+      "shock_font": "Georgia",
+      "shock_size": 124,
+      "shock_color": "#F02D2D",
+      "glow_size": 8,
+      "glow_blur": 12,
+      "max_words": 3,
+      "max_chars": 18,
+      "animation": "chunk",
+      "uppercase": true,
+      "censor_profanity": true
+    },
+    "seam_words": {
+      "position_y": 870,
+      "small_font": "Arial Black",
+      "small_size": 50,
+      "small_color": "#FFFFFF",
+      "keyword_font": "Arial Black",
+      "keyword_size": 58,
+      "keyword_color": "#FFD21F",
+      "keyword_italic": false,
+      "shock_font": "Georgia",
+      "shock_size": 124,
+      "shock_color": "#F02D2D",
+      "glow_size": 8,
+      "glow_blur": 12,
+      "max_words": 3,
+      "max_chars": 18,
+      "animation": "chunk",
+      "uppercase": true,
+      "censor_profanity": true
     }
   },
-
   "hook_overlays": {
-    "typewriter_top": {"enabled": true, "position_y": 330, "seconds": 2.5},
-    "none": {"enabled": false}
+    "typewriter_top": {
+      "enabled": true,
+      "position_y": 330,
+      "seconds": 2.5
+    },
+    "none": {
+      "enabled": false
+    }
   },
-
   "motion": {
     "punchy": {
-      "cold_open": true, "cold_open_seconds": 1.6,
-      "intro_zoom": 1.22, "intro_seconds": 0.35,
-      "punch_zoom": 0.13, "punch_decay": 0.45, "max_punches_per_4s": 1,
-      "shake_px": 22, "shake_rotate_deg": 0.9,
-      "slow_push": 0.035, "jump_cut_zoom": 1.09,
-      "flash_transition": true, "glitch_transition": true,
-      "cut_silences": true, "silence_min_gap": 0.8, "silence_keep": 0.3,
-      "drop_overlay": ["flares", "film_burn", "light_leaks"], "drop_overlay_seconds": 1.0, "drop_overlay_strength": 0.9, "drop_overlay_lead": 0.1
+      "cold_open": true,
+      "cold_open_seconds": 1.6,
+      "intro_zoom": 1.22,
+      "intro_seconds": 0.35,
+      "punch_zoom": 0.13,
+      "punch_decay": 0.45,
+      "max_punches_per_4s": 1,
+      "shake_px": 22,
+      "shake_rotate_deg": 0.9,
+      "slow_push": 0.035,
+      "jump_cut_zoom": 1.09,
+      "flash_transition": true,
+      "glitch_transition": true,
+      "cut_silences": true,
+      "silence_min_gap": 0.8,
+      "silence_keep": 0.3,
+      "drop_overlay": [
+        "flares",
+        "film_burn",
+        "light_leaks"
+      ],
+      "drop_overlay_seconds": 1.0,
+      "drop_overlay_strength": 0.9,
+      "drop_overlay_lead": 0.1
     },
     "smooth": {
-      "cold_open": true, "cold_open_seconds": 1.6,
-      "intro_zoom": 1.12, "intro_seconds": 0.5,
-      "punch_zoom": 0.07, "punch_decay": 0.8, "max_punches_per_4s": 1,
-      "shake_px": 10, "shake_rotate_deg": 0.4,
-      "slow_push": 0.05, "jump_cut_zoom": 1.06,
-      "flash_transition": true, "glitch_transition": false,
-      "cut_silences": true, "silence_min_gap": 1.0, "silence_keep": 0.35,
-      "drop_overlay": ["film_burn", "light_leaks", "flares"], "drop_overlay_seconds": 1.1, "drop_overlay_strength": 0.8, "drop_overlay_lead": 0.1
+      "cold_open": true,
+      "cold_open_seconds": 1.6,
+      "intro_zoom": 1.12,
+      "intro_seconds": 0.5,
+      "punch_zoom": 0.07,
+      "punch_decay": 0.8,
+      "max_punches_per_4s": 1,
+      "shake_px": 10,
+      "shake_rotate_deg": 0.4,
+      "slow_push": 0.05,
+      "jump_cut_zoom": 1.06,
+      "flash_transition": true,
+      "glitch_transition": false,
+      "cut_silences": true,
+      "silence_min_gap": 1.0,
+      "silence_keep": 0.35,
+      "drop_overlay": [
+        "film_burn",
+        "light_leaks",
+        "flares"
+      ],
+      "drop_overlay_seconds": 1.1,
+      "drop_overlay_strength": 0.8,
+      "drop_overlay_lead": 0.1
+    },
+    "clean": {
+      "_help": "trending clips are ONE continuous moment: no cold-open repeat, no punch-ins, no shakes, no flashes; only dead air over 2.5 s is trimmed",
+      "cold_open": false,
+      "cold_open_seconds": 1.6,
+      "intro_zoom": 1.0,
+      "intro_seconds": 0.35,
+      "punch_zoom": 0.0,
+      "punch_decay": 0.45,
+      "max_punches_per_4s": 0,
+      "shake_px": 0,
+      "shake_rotate_deg": 0.0,
+      "slow_push": 0.0,
+      "jump_cut_zoom": 1.0,
+      "flash_transition": false,
+      "glitch_transition": false,
+      "cut_silences": true,
+      "silence_min_gap": 2.5,
+      "silence_keep": 0.6,
+      "drop_overlay": [],
+      "drop_overlay_seconds": 1.0,
+      "drop_overlay_strength": 0.0,
+      "drop_overlay_lead": 0.1
+    },
+    "pro": {
+      "_help": "measured on 19 trending GTA 6 clips (2026-11-20): dead air cut (shots ~1.5-3 s in edited clips), quick 0.2-0.4 s zooms of 2-6 %, real-time 60 fps, no shakes/flashes/cold-open repeat",
+      "cold_open": false,
+      "cold_open_seconds": 1.6,
+      "intro_zoom": 1.0,
+      "intro_seconds": 0.35,
+      "punch_zoom": 0.06,
+      "punch_decay": 0.5,
+      "punch_every_s": 6,
+      "max_punches_per_4s": 1,
+      "shake_px": 0,
+      "shake_rotate_deg": 0.0,
+      "slow_push": 0.0,
+      "jump_cut_zoom": 1.05,
+      "flash_transition": false,
+      "glitch_transition": false,
+      "cut_silences": true,
+      "silence_min_gap": 1.2,
+      "silence_keep": 0.35,
+      "drop_overlay": [],
+      "drop_overlay_seconds": 1.0,
+      "drop_overlay_strength": 0.0,
+      "drop_overlay_lead": 0.1
     }
   },
-
   "color_grades": {
-    "pop": {"contrast": 1.14, "gamma": 0.86, "saturation": 1.22, "sharpen": 0.55, "vignette": 0.22,
-            "lut": "pack3_brightshades.cube", "lut_strength": 0.4},
-    "cinematic": {"contrast": 1.18, "gamma": 0.9, "saturation": 1.1, "sharpen": 0.45, "vignette": 0.3,
-                  "lut": "pack2_lut_urban_2.cube", "lut_strength": 0.5}
+    "pop": {
+      "contrast": 1.14,
+      "gamma": 0.86,
+      "saturation": 1.22,
+      "sharpen": 0.55,
+      "vignette": 0.22,
+      "lut": "pack3_brightshades.cube",
+      "lut_strength": 0.4
+    },
+    "cinematic": {
+      "contrast": 1.18,
+      "gamma": 0.9,
+      "saturation": 1.1,
+      "sharpen": 0.45,
+      "vignette": 0.3,
+      "lut": "pack2_lut_urban_2.cube",
+      "lut_strength": 0.5
+    },
+    "natural": {
+      "contrast": 1.03,
+      "gamma": 0.98,
+      "saturation": 1.06,
+      "sharpen": 0.18,
+      "vignette": 0.0,
+      "lut": "",
+      "lut_strength": 0.0
+    }
   },
-
   "sound": {
     "standard": {
       "music_volume": 0.42,
@@ -119,9 +362,40 @@
       "noise_reduction": true,
       "loudness_lufs": -14,
       "true_peak_db": -1.5
+    },
+    "clean": {
+      "_help": "the streamer's own audio only: no music, no effect sounds",
+      "music_mode": "none",
+      "music_volume": 0.0,
+      "music_duck_under_speech": 0.22,
+      "sfx_whoosh_on_cuts": 0.0,
+      "sfx_whoosh_on_punch": 0.0,
+      "sfx_boom_on_drop": 0.0,
+      "sfx_riser_before_drop": 0.0,
+      "sfx_glitch_on_drop": 0.0,
+      "sfx_boom_on_shake": 0.0,
+      "sfx_shutter_on_drop": 0.0,
+      "noise_reduction": false,
+      "loudness_lufs": -14,
+      "true_peak_db": -1.5
+    },
+    "pro": {
+      "_help": "streamer + game audio; licensed music (assets/music) very low under speech only if you add tracks; a soft whoosh on zoom punches",
+      "music_mode": "library_only",
+      "music_volume": 0.12,
+      "music_duck_under_speech": 0.3,
+      "sfx_whoosh_on_cuts": 0.0,
+      "sfx_whoosh_on_punch": 0.12,
+      "sfx_boom_on_drop": 0.0,
+      "sfx_riser_before_drop": 0.0,
+      "sfx_glitch_on_drop": 0.0,
+      "sfx_boom_on_shake": 0.0,
+      "sfx_shutter_on_drop": 0.0,
+      "noise_reduction": false,
+      "loudness_lufs": -14,
+      "true_peak_db": -1.5
     }
   },
-
   "export": {
     "video_codec": "libx264",
     "crf": 16,
