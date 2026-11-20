@@ -376,6 +376,13 @@ def _make_clip(cid, m, info, lang, url, work, src_dir, settings, presets, v):
                      f"{'REWRITTEN → ' + seen['title'] if seen['changed'] else 'ok: ' + seen['title']}")
             pkg["banner"], pkg["seen"] = seen["title"], seen["seen"]
             pkg_file.write_text(json.dumps(pkg, indent=1, ensure_ascii=False), encoding="utf-8")
+            if seen.get("other_content") and settings.get("skip_other_content", True):
+                # the moment runs into a different trailer/game/end card: a "GTA 6" title would mislead
+                msg = f"skipped: part of the clip is not {pkg.get('game') or 'the game'} ({seen.get('other_what', '')[:120]})"
+                db.update_clip(cid, status="qc_failed", qc={"error": msg})
+                db.event("warning", cid, "vision", msg)
+                log.warning(f"{cid}: {msg}")
+                return
     if presets["presets"].get(settings["editing_preset"], {}).get("title_cfg"):
         on_screen = pkg.get("banner") or re.sub(r"\s#\S+", "", pkg.get("youtube_title") or "") or on_screen
     res = render_clip(src, words, cs, cs + length, on_screen, presets, settings,

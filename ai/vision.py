@@ -27,18 +27,20 @@ What is said (may contain transcription errors): {text}
 feature described in the speech (e.g. "no minimap") can be true even if you cannot see it. Only if it is \
 clearly FALSE, write a new one: 3-9 words, normal sentence case, names {game}, ONE emoji at the end, no \
 hashtags. If unsure, keep it (title_true = true).
-3. Does the FIRST frame already show the thing the title promises (yes/no)?"""
+3. Does the FIRST frame already show the thing the title promises (yes/no)?
+4. Does ANY frame show something that is NOT {game} gameplay/footage or the streamer, e.g. ANOTHER game, a different trailer, an anime/film clip or an ad? (other_content = true only when you clearly see that; the streamer's facecam, menus, logos, end cards and loading screens of {game} itself are fine)"""
 
 SCHEMA = {"type": "object", "properties": {
     "seen": {"type": "string"}, "title_true": {"type": "boolean"}, "title": {"type": "string"},
-    "first_frame_shows_it": {"type": "boolean"}}}
+    "first_frame_shows_it": {"type": "boolean"},
+    "other_content": {"type": "boolean"}, "other_what": {"type": "string"}}}
 
 
-def frames(video, start, length, n=4, width=480):
-    """n JPEG frames (base64) spread over [start, start+length] of the video."""
+def frames(video, start, length, n=6, width=480):
+    """n JPEG frames (base64) spread evenly from the first to the last second of [start, start+length]."""
     out = []
     for i in range(n):
-        t = start + (0.4 if i == 0 else length * i / n)
+        t = start + 0.4 + (length - 1.0) * i / max(1, n - 1)      # first AND last second are seen
         r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1",
                             "-vf", f"scale={width}:-2", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg", "-"],
                            capture_output=True, timeout=60)
@@ -72,4 +74,5 @@ def check_title(settings, video, start, length, pkg, text, client=None) -> dict:
     if title and game and game.lower().replace(" ", "") not in title.lower().replace(" ", ""):
         title = banner                       # a rewrite that drops or changes the game name is not trusted
     return {"title": title or banner, "seen": got.get("seen", ""), "changed": bool(title and title != banner),
-            "first_frame_shows_it": got.get("first_frame_shows_it")}
+            "first_frame_shows_it": got.get("first_frame_shows_it"),
+            "other_content": bool(got.get("other_content")), "other_what": got.get("other_what", "")}
