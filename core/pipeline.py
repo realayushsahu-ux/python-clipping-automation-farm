@@ -292,7 +292,8 @@ def _run(v, settings):
             db.update_clip(cid, status="failed", qc={"error": str(exc)[:500]})
             db.event("error", cid, "editing", f"{exc}\n{traceback.format_exc()[-1500:]}")
             log.error(f"{cid} failed: {str(exc)[:200]}")
-    made = sum(1 for c in db.clips(vid, "ready", "qc_failed") if c["clip_id"] in clip_ids)
+    made = sum(1 for c in db.clips(vid, "ready", "approved", "scheduled", "posting", "posted", "manual_post", "qc_failed")
+               if c["clip_id"] in clip_ids)          # auto-approve may have moved finished clips on already
     db.update_video(vid, stage_detail=f"{made} clip(s) made")
     if made == 0:
         raise FarmError("no clip could be made")
