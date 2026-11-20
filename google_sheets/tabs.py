@@ -129,6 +129,8 @@ SETTINGS_ROWS = [
     ("timezone", "e.g. Asia/Kolkata"),
     ("ai_provider", "openai / gemini / offline"),
     ("caption_language", "auto / en / hinglish"),
+    ("ai_effort_moments", "how hard the AI thinks when PICKING the moments (what grabs viewers): medium (tested 2026-11-20: tighter, sharper picks; ~Rs 1 more per VIDEO) / low / high"),
+    ("ai_effort_packaging", "how hard the AI thinks when writing titles/captions: low (chosen 2026-11-20: same quality, about half the cost) / medium / high"),
     ("editing_preset", "viral_auto (trending format: face on top or black card) / card / facecam_top / auto / streamer_split / game_full"),
     ("music_mode", "library / generated / none"),
     ("sheet_poll_seconds", "how often the farm reads this sheet"),

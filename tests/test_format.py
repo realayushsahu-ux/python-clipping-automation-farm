@@ -22,7 +22,8 @@ LOCK = CONFIG_DIR / "approved_format.json"
 SETTING_KEYS = ["editing_preset", "voice_commentary", "music_mode", "clip_min_seconds", "clip_max_seconds",
                 "final_max_seconds", "long_clip_kinds", "long_clip_max_seconds", "source_max_height",
                 "focus_scan_over_minutes", "focus_scan_minutes", "focus_scan_model", "focus_scan_beam",
-                "voice_take_mode", "only_topic_videos", "min_score", "clips_per_video"]
+                "voice_take_mode", "only_topic_videos", "min_score", "clips_per_video",
+                "ai_effort_packaging", "ai_effort_moments"]
 
 
 def current():

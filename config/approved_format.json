@@ -220,6 +220,8 @@
   "voice_take_mode": "text",
   "only_topic_videos": false,
   "min_score": 70,
-  "clips_per_video": 9
+  "clips_per_video": 9,
+  "ai_effort_packaging": "low",
+  "ai_effort_moments": "medium"
  }
 }

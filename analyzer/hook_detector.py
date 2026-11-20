@@ -141,7 +141,8 @@ def find_moments(transcript, loud_rel, chat, info, settings, workdir, clips_want
                                    want=want, min_d=min_d, max_d=max_d, transcript=body, language_note=note,
                                    long_max=int(settings.get("long_clip_max_seconds", max_d)),
                                    long_kinds="/".join(settings.get("long_clip_kinds") or ["funny"]))
-        got = ask_json(settings, MOMENTS_SYSTEM, user, MOMENTS_SCHEMA, max_tokens=6000,
+        got = ask_json(settings, MOMENTS_SYSTEM, user, MOMENTS_SCHEMA, max_tokens=12000,
+                       effort=settings.get("ai_effort_moments", "low"),
                        offline_fn=lambda: {"clips": offline_moments(words, loud_rel, chat, lo, hi, min_d, max_d, want),
                                            "_offline": True})
         clips = (got or {}).get("clips", [])
