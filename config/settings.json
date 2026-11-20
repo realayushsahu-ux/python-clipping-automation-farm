@@ -41,6 +41,7 @@
   "keep_awake": "posting",
   "keep_awake_minutes": 15,
   "wake_pc_for_posting": true,
+  "farm_window": true,
   "wake_minutes_before": 10,
   "winner_views_youtube": 1000,
   "winner_views_instagram": 100,

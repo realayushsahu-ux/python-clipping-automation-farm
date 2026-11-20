@@ -161,6 +161,47 @@ def pythonw() -> str:
     return str(w if w.exists() else exe)
 
 
+def python_console() -> str:
+    exe = Path(sys.executable)
+    c = exe.with_name("python.exe")
+    return str(c if c.exists() else exe)
+
+
+def farm_exe(settings) -> str:
+    """farm_window = yes: the farm runs in its own console window (like any script you start by hand)."""
+    return python_console() if settings.get("farm_window", True) else pythonw()
+
+
+def _has_console() -> bool:
+    try:
+        return sys.stdout is not None and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _watch(out_path: Path, visible: bool) -> int:
+    """Run main.py watch once. In a window its lines show there AND go to watch_console.log."""
+    cmd = [sys.executable, str(ROOT / "main.py"), "watch"]
+    with open(out_path, "a", encoding="utf-8") as out:
+        if not visible:
+            return subprocess.call(cmd, cwd=str(ROOT), stdout=out, stderr=subprocess.STDOUT,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+        p = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                             text=True, encoding="utf-8", errors="replace", bufsize=1)
+        from core.narrator import SAY_MARK
+        for line in p.stdout:
+            if line.startswith(SAY_MARK):          # only the plain-English status lines go to the window
+                try:
+                    sys.stdout.write(line[len(SAY_MARK):])
+                    sys.stdout.flush()
+                except (OSError, ValueError):
+                    pass
+            out.write(line)
+            out.flush()
+        return p.wait()
+
+
 def supervise():
     """Run `main.py watch` forever; restart it 30 s after it stops (unless main.py stop was used)."""
     lock = Lock(SUP_LOCK)
@@ -170,14 +211,19 @@ def supervise():
     STOP.unlink(missing_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     fails, started = 0, 0.0
+    visible = _has_console()
+    if visible:
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleTitleW("Clipping Farm (do not close: closing stops posting)")
+        print("Clipping Farm is running by itself (no Claude needed). It starts with Windows, wakes the PC\n"
+              "for every post and restarts if it crashes. Close this window or run  main.py stop  to stop it.\n",
+              flush=True)
     log.info("supervisor started")
     try:
         while not STOP.exists():
             started = time.time()
-            with open(LOGS_DIR / "watch_console.log", "a", encoding="utf-8") as out:
-                rc = subprocess.call([sys.executable, str(ROOT / "main.py"), "watch"], cwd=str(ROOT),
-                                     stdout=out, stderr=subprocess.STDOUT,
-                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            rc = _watch(LOGS_DIR / "watch_console.log", visible)
             if STOP.exists():
                 break
             if rc == 3:                        # another watch holds the lock (started by hand)
@@ -186,6 +232,9 @@ def supervise():
             fails = fails + 1 if time.time() - started < 300 else 1
             wait = min(30 * fails, 600)
             log.error(f"watch stopped (exit {rc}); starting it again in {wait} s")
+            if visible:
+                print(f"{datetime.now().strftime('%I:%M %p')}  The farm hit a problem and stopped. "
+                      f"Starting it again in {wait} seconds (details: logs/watch_console.log).", flush=True)
             for _ in range(wait):
                 if STOP.exists():
                     break
@@ -196,7 +245,7 @@ def supervise():
     return 0
 
 
-def start_background() -> str:
+def start_background(settings=None) -> str:
     if farm_state()["running"] or is_locked(SUP_LOCK):
         return "already running: " + describe()
     STOP.unlink(missing_ok=True)
@@ -204,8 +253,10 @@ def start_background() -> str:
         r = subprocess.run(["schtasks", "/Run", "/TN", TASK], capture_output=True, text=True)
         if r.returncode == 0:
             return "started (Task Scheduler task ClippingFarm)"
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([pythonw(), str(ROOT / "main.py"), "service"], cwd=str(ROOT), creationflags=flags,
+    window = bool((settings or {}).get("farm_window", True))
+    flags = (getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if window else getattr(subprocess, "DETACHED_PROCESS", 0))         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([python_console() if window else pythonw(), str(ROOT / "main.py"), "service"], cwd=str(ROOT),
+                     creationflags=flags,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      close_fds=True)
     return "started in the background"
@@ -288,7 +339,7 @@ def task_xml(settings, user: str) -> str:
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>{_xml_escape(pythonw())}</Command>
+      <Command>{_xml_escape(farm_exe(settings))}</Command>
       <Arguments>"{_xml_escape(ROOT / 'main.py')}" service</Arguments>
       <WorkingDirectory>{_xml_escape(ROOT)}</WorkingDirectory>
     </Exec>
@@ -312,6 +363,7 @@ def install_autostart(settings) -> str:
         raise RuntimeError((r.stderr or r.stdout).strip())
     INSTALLED.write_text(json.dumps({"wake_times": wake_times(settings),
                                      "wake": bool(settings.get("wake_pc_for_posting", True)),
+                                     "window": bool(settings.get("farm_window", True)),
                                      "installed": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
     return f"task {TASK} installed: starts at logon, wakes the PC at {', '.join(wake_times(settings))}"
 
@@ -334,8 +386,9 @@ def refresh_autostart(settings):
         old = json.loads(INSTALLED.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    want = {"wake_times": wake_times(settings), "wake": bool(settings.get("wake_pc_for_posting", True))}
-    if old.get("wake_times") == want["wake_times"] and old.get("wake") == want["wake"]:
+    want = {"wake_times": wake_times(settings), "wake": bool(settings.get("wake_pc_for_posting", True)),
+            "window": bool(settings.get("farm_window", True))}
+    if all(old.get(k, True if k == "window" else None) == v for k, v in want.items()):
         return None
     try:
         msg = install_autostart(settings)

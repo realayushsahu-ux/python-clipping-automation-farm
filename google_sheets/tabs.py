@@ -108,6 +108,7 @@ SETTINGS_ROWS = [
     ("posts_per_day", "how many posts per day"),
     ("posting_times", "time slots (India time), e.g. 10:00,18:00,20:00,22:00,23:30; a slot with no clip is skipped"),
     ("keep_awake", "posting = PC stays awake from 15 min before a post until it is done; always; off"),
+    ("farm_window", "yes = the farm runs in its own window you can see (closing it stops the farm); no = hidden"),
     ("wake_pc_for_posting", "yes = Windows wakes the PC 10 min before each posting time (main.py autostart on)"),
     ("winner_views_youtube", "a YouTube Short with at least this many views is a winner (the AI learns from it)"),
     ("winner_views_instagram", "an Instagram Reel with at least this many views is a winner"),

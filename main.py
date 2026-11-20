@@ -237,6 +237,7 @@ def cmd_watch(_):
     from core.pipeline import process_video, remake_clip
     use_sheet = bool(env("GOOGLE_SHEET_ID"))
     stop = threading.Event()
+    synced = threading.Event()                         # first Sheet sync done (Settings tab applied)
     log = get_logger("watch")
 
     def sheet_loop():
@@ -271,6 +272,7 @@ def cmd_watch(_):
             except Exception as exc:  # noqa: BLE001 - keep watching, try again next round
                 io = None
                 log.error(f"sheet sync failed: {str(exc)[:300]}")
+            synced.set()
             stop.wait(max(15, int(settings.get("sheet_poll_seconds", 60))))
 
     if use_sheet:
@@ -307,6 +309,13 @@ def cmd_watch(_):
         service.set_awake(False)
 
     threading.Thread(target=publish_loop, daemon=True, name="publish").start()
+
+    def narrator_loop():
+        from core.narrator import Narrator
+        synced.wait(180 if use_sheet else 0)
+        Narrator(settings).run(stop)
+
+    threading.Thread(target=narrator_loop, daemon=True, name="narrator").start()
     print(f"auto posting: {'ON' if settings.get('posting_enabled') else 'off'} "
           f"(Settings → posting_enabled), times {', '.join(settings.get('posting_times') or [])}")
     if clip_server.start(settings):
@@ -498,7 +507,7 @@ def cmd_service(_):
 def cmd_start(_):
     ensure_dirs()
     from core import service
-    print(service.start_background())
+    print(service.start_background(settings))
     return 0
 
 
@@ -524,7 +533,7 @@ def cmd_autostart(a):
         except RuntimeError as exc:
             print(f"[x ] could not create the task: {exc}")
             return 1
-        print("     " + service.start_background())
+        print("     " + service.start_background(settings))
     elif a.action == "off":
         print(service.remove_autostart() + " (the farm keeps running until main.py stop)")
     print(f"autostart: {'on' if service.autostart_installed() else 'off'}")
