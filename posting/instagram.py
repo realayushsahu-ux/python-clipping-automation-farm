@@ -23,6 +23,7 @@ from posting.errors import Ambiguous, Permanent, Retryable
 
 log = get_logger("instagram")
 RATE_CODES = {4, 9, 17, 32, 613, 80002}           # Meta "slow down" error codes
+NEEDS_YOU_CODES = {10, 102, 190}                  # permission / session problems: only a person can fix these
 
 
 def _cfg():
@@ -58,10 +59,16 @@ def _check(r, step, published_step=False):
         if published_step:
             raise Ambiguous(msg)
         raise Retryable(msg, 10)
-    raise Permanent(msg)
+    if code in NEEDS_YOU_CODES or (code and 200 <= int(code) <= 299) or "permission" in msg.lower():
+        raise Permanent(msg + " → the Instagram app/token is missing a permission (POSTING_SETUP.md)")
+    # Any other refusal (ProcessingFailedError, media not ready, bad request...) came with a clear answer
+    # that NOTHING was published, so trying again can never make a duplicate. The farm heals itself:
+    # the next try uses smaller upload pieces and a lighter Instagram copy (see publish).
+    raise Retryable(msg, 15)
 
 
-IG_MAX_MB = 35       # every upload <= 38 MB went through; 48 MB and 58 MB copies got ProcessingFailedError
+IG_MAX_MB = 35       # keeps uploads quick. The ProcessingFailedError of 2026-11 was the single long upload
+                     # request, not the size: see upload_chunks
 
 
 def ig_video_kbps(duration_s: float, max_mb: float = IG_MAX_MB) -> int:
@@ -70,7 +77,7 @@ def ig_video_kbps(duration_s: float, max_mb: float = IG_MAX_MB) -> int:
     if not duration_s or duration_s <= 0:
         return 8000
     budget = max_mb * 8_000 / duration_s - 128 - 150          # minus audio + container overhead
-    return int(max(2500, min(8000, budget)))
+    return int(max(1500, min(8000, budget)))
 
 
 def _duration(video: Path) -> float:
@@ -83,19 +90,20 @@ def _duration(video: Path) -> float:
         return 0.0
 
 
-def ig_copy(video: Path) -> Path:
+def ig_copy(video: Path, max_mb: float = None) -> Path:
     """An Instagram-spec copy of the clip (Reels refuse our 15 Mbps / 192 kbps master with
     "ProcessingFailedError"): H.264 High ≤8 Mbps and at most IG_MAX_MB, AAC 128 kbps 48 kHz, faststart.
     Kept in storage/_system/instagram and reused while it is newer than the clip and small enough."""
     import subprocess
     from core.paths import SYSTEM
-    out = SYSTEM / "instagram" / f"{video.stem}_ig.mp4"
+    cap = float(max_mb or IG_MAX_MB)
+    out = SYSTEM / "instagram" / (f"{video.stem}_ig.mp4" if cap >= IG_MAX_MB else f"{video.stem}_ig_{int(cap)}mb.mp4")
     if (out.is_file() and out.stat().st_mtime >= video.stat().st_mtime
-            and 0 < out.stat().st_size <= IG_MAX_MB * 1_000_000):
+            and 0 < out.stat().st_size <= cap * 1_000_000):
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".part.mp4")
-    kb = ig_video_kbps(_duration(video))
+    kb = ig_video_kbps(_duration(video), cap)
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(video),
            "-c:v", "libx264", "-preset", "medium", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
            "-r", "30", "-b:v", f"{kb}k", "-maxrate", f"{int(kb * 1.25)}k", "-bufsize", f"{kb * 2}k", "-g", "60",
@@ -108,6 +116,53 @@ def ig_copy(video: Path) -> Path:
     tmp.replace(out)
     log.info(f"{video.stem}: Instagram copy {out.stat().st_size // 1_000_000} MB")
     return out
+
+
+CHUNK_BYTES = 4 * 1024 * 1024
+
+
+def upload_chunks(s, uri, video: Path, token: str, chunk=None):
+    """Send the video in 4 MB pieces (rupload 'offset' protocol).
+
+    Found 2026-11-21: one long upload request (> ~30 s) comes back 400 ProcessingFailedError for every
+    clip over ~45 s, although the video is fine. In pieces each request takes 1-3 s; only the last one
+    waits while Instagram checks the whole video, and that last answer can still be this same 400 even
+    though the container then turns FINISHED. So after the last piece a ProcessingFailedError (or a
+    timeout) is not trusted: the caller asks the container's status_code, which is the real answer."""
+    import requests
+    chunk = chunk or CHUNK_BYTES
+    size = video.stat().st_size
+    off = 0
+    with open(video, "rb") as fh:
+        while off < size:
+            fh.seek(off)
+            data = fh.read(chunk)
+            last = off + len(data) >= size
+            for attempt in range(3):
+                try:
+                    r = s.post(uri, data=data, timeout=(30, 300), headers={
+                        "Authorization": f"OAuth {token}", "offset": str(off), "file_size": str(size)})
+                except (requests.ConnectionError, requests.Timeout):
+                    if last:
+                        log.info(f"{video.stem}: no answer to the last upload piece, checking the status")
+                        return
+                    if attempt == 2:
+                        raise
+                    time.sleep(5)
+                    continue
+                txt = r.text or ""
+                if r.status_code < 400 or "PartialRequestError" in txt:
+                    break                                  # 200 done, 206 = piece stored, send the next
+                if last and "ProcessingFailedError" in txt:
+                    log.info(f"{video.stem}: Instagram answered ProcessingFailedError to the last piece; "
+                             "checking the real status")
+                    return
+                if r.status_code >= 500 and attempt < 2:
+                    time.sleep(5)
+                    continue
+                _check(r, "upload")                        # raises the right error kind
+                break
+            off += len(data)
 
 
 def account_name(session=None) -> str:
@@ -131,7 +186,14 @@ def publish(job, settings, session=None, sleep=time.sleep, prepare=ig_copy) -> d
     video = Path(job["file"])
     if not video.is_file():
         raise Permanent(f"video file missing: {video}")
-    video = prepare(video)        # before the container: a failed encode wastes no container
+    retry = int(job.get("attempt") or 1) >= 2
+    mb = float(settings.get("instagram_retry_max_mb" if retry else "instagram_max_mb", 20 if retry else IG_MAX_MB))
+    video = prepare(video, mb) if prepare is ig_copy else prepare(video)   # before the container
+    chunk = int(float(settings.get("instagram_upload_chunk_mb", 4)) * 1024 * 1024)
+    if retry:
+        chunk = max(256 * 1024, chunk // 4)       # self-heal: a retry sends 1 MB pieces
+        log.info(f"{job.get('clip_id')}: Instagram try {job.get('attempt')}: lighter copy ({mb:.0f} MB cap), "
+                 f"{chunk // 1024} KB pieces")
     base = f"https://{c['host']}/{c['ver']}"
     net = (requests.ConnectionError, requests.Timeout)
     try:
@@ -143,11 +205,7 @@ def publish(job, settings, session=None, sleep=time.sleep, prepare=ig_copy) -> d
         cid = cont["id"]
         uri = cont.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{c['ver']}/{cid}"
         # 2. upload the bytes
-        size = video.stat().st_size
-        with open(video, "rb") as fh:
-            r = s.post(uri, data=fh, timeout=(30, 900), headers={
-                "Authorization": f"OAuth {c['token']}", "offset": "0", "file_size": str(size)})
-        _check(r, "upload")
+        upload_chunks(s, uri, video, c["token"], chunk)
         # 3. wait for Instagram to process it
         waited, status = 0, ""
         limit = int(settings.get("instagram_processing_timeout_s", 600))

@@ -328,6 +328,13 @@ def _day(ts):
     return f"{day} {t.strftime('%I:%M %p').lstrip('0')}"
 
 
+def _due(p):
+    """When a post goes out: its retry time if it failed, else its scheduled time ('YYYY-MM-DD HH:MM')."""
+    if p["status"] == "failed" and p.get("next_try"):
+        return p["next_try"][:16].replace("T", " ")
+    return p.get("scheduled_at") or "9999"
+
+
 def schedule_items(settings):
     """One item per clip that is still to be posted: (time, clip, platforms, status, problem)."""
     db = get_db()
@@ -344,8 +351,10 @@ def schedule_items(settings):
         worst = min(ps, key=lambda p: rank[p["status"]])
         problem = " | ".join(f"{p['platform']}: {(p.get('last_error') or '')[:150]}"
                              for p in ps if p["status"] in ("failed", "needs_manual") and p.get("last_error"))
-        items.append((min(p.get("scheduled_at") or "9999" for p in ps), c, sorted(p["platform"] for p in ps),
-                      names[worst["status"]], problem))
+        status = names[worst["status"]]
+        if worst["status"] == "failed" and worst.get("next_try"):
+            status = f"🔁 trying again at {_day(worst['next_try'][:16].replace('T', ' '))}"
+        items.append((min(_due(p) for p in ps), c, sorted(p["platform"] for p in ps), status, problem))
     for c in db.clips(None, "ready"):
         items.append((c.get("post_time") or "9999", c, sorted(queue.platforms_of(c, settings)),
                       "✋ waiting for your yes (Ready to Post)", ""))

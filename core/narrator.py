@@ -74,14 +74,17 @@ class Narrator:
         return videos, clips, posts
 
     def _next(self, posts, clips):
-        due = sorted((p for p in posts.values() if p["status"] in ("scheduled", "failed") and p.get("scheduled_at")),
-                     key=lambda p: p["scheduled_at"])
+        def at(p):
+            if p["status"] == "failed" and p.get("next_try"):
+                return p["next_try"][:16].replace("T", " ")
+            return p.get("scheduled_at") or ""
+        due = sorted((p for p in posts.values() if p["status"] in ("scheduled", "failed") and at(p)), key=at)
         waiting = {p["clip_id"] for p in due}
         if not due:
             return None, 0
         first = due[0]
         plats = [p["platform"] for p in due if p["clip_id"] == first["clip_id"]]
-        return (first["clip_id"], first["scheduled_at"], tuple(sorted(plats))), len(waiting)
+        return (first["clip_id"], at(first), tuple(sorted(plats))), len(waiting)
 
     def _say_next(self, posts, clips, force=False):
         nxt, waiting = self._next(posts, clips)
@@ -167,7 +170,8 @@ class Narrator:
             elif st == "posted":
                 say(f"{cid} posted to {plat}: {p.get('url') or 'done'}")
             elif st == "failed":
-                say(f"{cid} could not post to {plat}: {short(p.get('last_error'), 90)}. It will try again.")
+                again = f" at {when(p['next_try'])}" if p.get("next_try") else ""
+                say(f"{cid} could not post to {plat}: {short(p.get('last_error'), 90)}. Trying again{again}.")
             elif st == "needs_manual":
                 say(f"{cid} needs you: {plat} post stopped ({short(p.get('last_error'), 90)}). See the Sheet.")
             elif st == "cancelled":

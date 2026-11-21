@@ -232,6 +232,33 @@ def main():
     assert out == {"external_id": "M1", "url": "https://instagram.com/reel/abc", "note": "comment posted, pin it in the app"}
     assert [x[1].split("/")[-1] for x in sess.log] == ["media", "C1", "C1", "C1", "media_publish", "M1", "comments"]
     assert sess.log[1][2]["file_size"] == "3000" and sess.log[1][2]["Authorization"] == "OAuth test-token"
+    # 8b. a long clip: sent in pieces, and the false ProcessingFailedError on the last piece is not trusted
+    sess = FakeGraph(last_piece_fails=True)
+    out = instagram.publish({**PKG, "clip_id": a, "file": str(video)},
+                            {**st, "instagram_upload_chunk_mb": 1000 / 1024 / 1024}, session=sess,
+                            sleep=lambda s: None, prepare=lambda p: p)
+    assert out["external_id"] == "M1" and sess.got == 3000
+    assert [x[1].split("/")[-1] for x in sess.log][:4] == ["media", "C1", "C1", "C1"]
+    assert [x[2]["offset"] for x in sess.log[1:4]] == ["0", "1000", "2000"]
+    # 8c. self-heal: an Instagram refusal before publishing is retried (never "needs you"); a bad token is not
+    from posting.errors import Retryable as _Rt
+    for body, kind in ((_R(400, {"debug_info": {"type": "ProcessingFailedError"}}), _Rt),
+                       (_R(400, {"error": {"code": 100, "message": "Invalid parameter"}}), _Rt),
+                       (_R(400, {"error": {"code": 190, "message": "token"}}), Permanent),
+                       (_R(403, {"error": {"code": 10, "message": "Application does not have permission"}}), Permanent)):
+        try:
+            instagram._check(body, "upload")
+            raise AssertionError("must raise")
+        except (_Rt, Permanent) as exc:
+            assert type(exc) is kind, (body.text, type(exc))
+    # a retry (attempt 2) sends smaller pieces: 4 MB setting -> 1 MB pieces on the retry
+    seen, real = [], instagram.upload_chunks
+    instagram.upload_chunks = lambda s_, u, v, tok, chunk=None: (seen.append(chunk), real(s_, u, v, tok, chunk))[1]
+    for attempt in (1, 2):
+        instagram.publish({**PKG, "clip_id": a, "file": str(video), "attempt": attempt}, st, session=FakeGraph(),
+                          sleep=lambda s: None, prepare=lambda p: p)
+    instagram.upload_chunks = real
+    assert seen == [4 * 1024 * 1024, 1024 * 1024], seen
     sess = FakeGraph(publish_fails=True)
     try:
         instagram.publish({**PKG, "clip_id": a, "file": str(video)}, st, session=sess, sleep=lambda s: None,
@@ -258,9 +285,9 @@ class _R:
 
 
 class FakeGraph:
-    def __init__(self, publish_fails=False, token_bad=False):
-        self.log, self.polls = [], 0
-        self.publish_fails, self.token_bad = publish_fails, token_bad
+    def __init__(self, publish_fails=False, token_bad=False, last_piece_fails=False):
+        self.log, self.polls, self.got = [], 0, 0
+        self.publish_fails, self.token_bad, self.last_piece_fails = publish_fails, token_bad, last_piece_fails
 
     def post(self, url, data=None, headers=None, timeout=None):
         self.log.append(("POST", url, headers or {}))
@@ -270,7 +297,13 @@ class FakeGraph:
             assert data["media_type"] == "REELS" and data["upload_type"] == "resumable"
             return _R(200, {"id": "C1", "uri": "https://rupload.facebook.com/ig-api-upload/v23.0/C1"})
         if "rupload" in url:
-            assert hasattr(data, "read")
+            assert isinstance(data, bytes) and int(headers["offset"]) == self.got
+            self.got += len(data)
+            if self.got < int(headers["file_size"]):
+                return _R(206, {"debug_info": {"retriable": True, "type": "PartialRequestError"}})
+            if self.last_piece_fails:              # what Instagram really answers for clips over ~45 s
+                return _R(400, {"debug_info": {"retriable": False, "type": "ProcessingFailedError",
+                                               "message": "Request processing failed"}})
             return _R(200, {"success": True, "message": "Upload successful."})
         if url.endswith("/media_publish"):
             if self.publish_fails:

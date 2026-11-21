@@ -78,7 +78,7 @@ def publish_one(post_id, settings) -> str:
         if not fn:
             raise Permanent(f"no publisher for {p['platform']}")
         try:
-            res = fn(job_for(c), settings)
+            res = fn({**job_for(c), "attempt": attempts}, settings)
         except (Retryable, Ambiguous, Permanent):
             raise
         except Exception as exc:  # noqa: BLE001

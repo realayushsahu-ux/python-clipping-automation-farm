@@ -36,7 +36,7 @@
   "youtube_privacy": "public",
   "youtube_category_id": "20",
   "post_first_comment": true,
-  "posting_max_attempts": 3,
+  "posting_max_attempts": 4,
   "posting_stuck_minutes": 120,
   "keep_awake": "posting",
   "keep_awake_minutes": 15,
@@ -92,6 +92,9 @@
   "audit_enabled": true,
   "audit_every_days": 7,
   "instagram_processing_timeout_s": 600,
+  "instagram_upload_chunk_mb": 4,
+  "instagram_max_mb": 35,
+  "instagram_retry_max_mb": 20,
   "default_platforms": [
     "instagram",
     "youtube"
