@@ -43,6 +43,25 @@ def _header_map(rows):
     return {h.strip().lower(): i for i, h in enumerate(rows[0])} if rows else {}
 
 
+def _new_columns(io, tab, rows):
+    """An update added a column (e.g. Voiceover, 2026-11-22): rebuild the tab in the new column order, moving
+    what you typed by column NAME, so nothing is lost or lands in the wrong column. Unknown columns you
+    added yourself are kept at the end."""
+    want = T.TABS[tab]["headers"]
+    h = _header_map(rows)
+    if all(x.lower() in h for x in want):
+        return rows
+    extra = [i for x, i in h.items() if x not in {w.lower() for w in want}]
+    out = [want + [rows[0][i] for i in extra]]
+    for r in rows[1:]:
+        out.append([_cell(r, h, x) for x in want] + [r[i] if i < len(r) else "" for i in extra])
+    io.write_all(tab, out)
+    spec = T.TABS[tab]
+    io.format_tab(tab, spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
+    log.info(f"{tab}: new column(s) {[x for x in want if x.lower() not in h]} added")
+    return out
+
+
 def _cell(row, hmap, name):
     i = hmap.get(name.lower())
     return row[i].strip() if i is not None and i < len(row) else ""
@@ -124,6 +143,7 @@ def sync_video_input(io, settings):
     rows = io.read(T.VIDEO_INPUT)
     if not rows:
         return {"new": 0}
+    rows = _new_columns(io, T.VIDEO_INPUT, rows)
     h = _header_map(rows)
     col = {name: h.get(name.lower()) for name in T.TABS[T.VIDEO_INPUT]["headers"]}
     cells, seen, new = [], {}, 0
@@ -142,6 +162,7 @@ def sync_video_input(io, settings):
             typed = _cell(row, h, "Status").lower()
             opts = {"clips_wanted": _int(_cell(row, h, "Clips Wanted")), "language": _cell(row, h, "Language") or None,
                     "section": _cell(row, h, "Section") or None, "layout": _cell(row, h, "Layout") or None,
+                    "voiceover": _cell(row, h, "Voiceover").lower() or None,
                     "platforms": _cell(row, h, "Platforms") or None}
             v = db.get_video(vid)
             if v is None:
@@ -153,6 +174,8 @@ def sync_video_input(io, settings):
                 db.update_video(vid, status="retry", last_error=None)
             elif typed == "redo" and v["status"] in ("done", "failed"):
                 redo_video(vid, **{k: x for k, x in opts.items() if x})
+            if v is not None and (opts["voiceover"] or None) != (v.get("voiceover") or None):
+                db.update_video(vid, voiceover=opts["voiceover"])      # changed later: used for clips made from now on
             v = db.get_video(vid)
             made = len(db.clips(vid, "ready", "approved", "scheduled", "posting", "posted"))
             want = {"Video ID": vid, "Status": v["status"], "Title": v.get("title") or "",

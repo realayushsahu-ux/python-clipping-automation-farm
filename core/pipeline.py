@@ -374,8 +374,25 @@ def _run(v, settings):
         raise FarmError("no clip could be made")
 
 
+def _video_settings(settings, v):
+    """The video's own choices from the Sheet (Video Input → Voiceover) over the Settings tab."""
+    vo = (v.get("voiceover") or "").strip().lower()
+    if vo not in ("voiceover", "normal", "yes", "no"):
+        return settings
+    import copy
+    st = copy.copy(settings)
+    st["voice_commentary"] = vo in ("voiceover", "yes")
+    return st
+
+
+def _video_layout(settings, v) -> str:
+    """Video Input → Layout, else Settings → default_layout (split = streamer on top), else auto."""
+    return (v.get("layout") or settings.get("default_layout") or "auto").strip().lower()
+
+
 def _make_clip(cid, m, info, lang, url, work, src_dir, settings, presets, v):
     db = get_db()
+    settings = _video_settings(settings, v)
     waits, tries = settings["retry_waits_seconds"], settings["retry_attempts"]
     length = m["end"] - m["start"]
     log.info(f"{cid}: {m.get('hook_text')} ({length:.0f}s @ {fmt_time(m['start'])}, score {m.get('score')})")
@@ -462,7 +479,7 @@ def _make_clip(cid, m, info, lang, url, work, src_dir, settings, presets, v):
         on_screen = pkg.get("banner") or re.sub(r"\s#\S+", "", pkg.get("youtube_title") or "") or on_screen
     res = render_clip(src, words, cs, cs + length, on_screen, presets, settings,
                       work / "render", cid, work / "render", variant=variant,
-                      preset_name=settings["editing_preset"], layout=v.get("layout") or "auto", max_seconds=max_len,
+                      preset_name=settings["editing_preset"], layout=_video_layout(settings, v), max_seconds=max_len,
                       voice=voice)
     check = qc.check(res["file"], max_dur=max_len + 10)
     ok = check["ok"]

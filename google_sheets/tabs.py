@@ -29,13 +29,15 @@ TABS = {
         "widths": [300, 760],
     },
     VIDEO_INPUT: {
-        # you type: URL (+ optional Clips Wanted, Language, Section, Layout, Platforms). Status: type retry / redo
-        "headers": ["URL", "Clips Wanted", "Language", "Section", "Layout", "Platforms",
+        # you type: URL (+ optional Clips Wanted, Language, Section, Layout, Voiceover, Platforms).
+        # Status: type retry / redo. Voiceover: "voiceover" = our 3-second AI narrator intro, "normal" = none,
+        # empty = the Settings tab's voice_commentary.
+        "headers": ["URL", "Clips Wanted", "Language", "Section", "Layout", "Voiceover", "Platforms",
                     "Video ID", "Status", "Title", "Clips Made", "Added At", "Updated At", "Message"],
-        "widths": [320, 90, 80, 130, 80, 140, 110, 100, 280, 80, 130, 130, 300],
-        "dropdowns": {3: ["auto", "en", "hi"], 5: ["auto", "split", "full"],
-                      8: ["new", "retry", "redo"]},
-        "typed": [1, 2, 3, 4, 5, 6, 8],
+        "widths": [320, 90, 80, 130, 80, 100, 140, 110, 100, 280, 80, 130, 130, 300],
+        "dropdowns": {3: ["auto", "en", "hi"], 5: ["auto", "split", "full"], 6: ["voiceover", "normal"],
+                      9: ["new", "retry", "redo"]},
+        "typed": [1, 2, 3, 4, 5, 6, 7, 9],
     },
     PROCESSING: {
         "headers": ["Item", "Title", "Stage", "Progress", "Attempts", "Updated At", "Message"],
@@ -123,7 +125,10 @@ SETTINGS_ROWS = [
     ("only_topic_videos", "no = any game works (titles/hashtags use the game the AI sees); yes = only the main "
                           "game (topic_words), others stop with a note"),
     ("topic_words", "words that mean the channel's game, comma separated, e.g. gta 6,gta vi,gta6"),
-    ("voice_commentary", "yes = our AI narrator adds a short intro + a take at the end of every new clip (free, local)"),
+    ("voice_commentary", "yes = our AI narrator adds a short intro + a take at the end of every new clip (free, local). "
+                         "Per video: Video Input → Voiceover"),
+    ("default_layout", "split = streamer on top, gameplay below (when the stream has a facecam); auto = the farm "
+                       "decides; full = gameplay only. Per video: Video Input → Layout"),
     ("voice_name", "narrator voice: am_fenrir, am_michael, am_puck, af_heart, bm_george (Kokoro voices)"),
     ("audit_enabled", "yes = once a week a channel audit names ONE fix for the week (Audit tab, main.py audit)"),
     ("audit_every_days", "days between audits"),

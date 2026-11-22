@@ -26,10 +26,40 @@ RATE_CODES = {4, 9, 17, 32, 613, 80002}           # Meta "slow down" error codes
 NEEDS_YOU_CODES = {10, 102, 190}                  # permission / session problems: only a person can fix these
 
 
+_resolved = {}      # (id, token) -> the Instagram account id to use
+
+
 def _cfg():
     host = env("INSTAGRAM_API_HOST", "graph.facebook.com").replace("https://", "").strip("/")
-    return {"host": host, "ver": env("INSTAGRAM_GRAPH_VERSION", "v23.0"),
-            "ig": env("INSTAGRAM_USER_ID"), "token": env("INSTAGRAM_ACCESS_TOKEN")}
+    c = {"host": host, "ver": env("INSTAGRAM_GRAPH_VERSION", "v23.0"),
+         "ig": env("INSTAGRAM_USER_ID"), "token": env("INSTAGRAM_ACCESS_TOKEN")}
+    c["ig"] = _account_id(c)
+    return c
+
+
+def _account_id(c) -> str:
+    """INSTAGRAM_USER_ID must be the Instagram account's id. Found 2026-11-22: after making a new token the
+    Facebook PAGE id went into .env instead, which breaks posting and views. If the id is a Page with a linked
+    Instagram account, that account is used (once per run; checked again when .env changes)."""
+    ig, token = c["ig"], c["token"]
+    if not ig or not token or c["host"] != "graph.facebook.com":
+        return ig
+    key = (ig, token)
+    if key not in _resolved:
+        _resolved[key] = ig
+        try:
+            import requests
+            r = requests.get(f"https://{c['host']}/{c['ver']}/{ig}", timeout=20,
+                             params={"fields": "instagram_business_account", "access_token": token}).json()
+            linked = (r.get("instagram_business_account") or {}).get("id")
+            if linked and linked != ig:
+                _resolved[key] = linked
+                log.warning("INSTAGRAM_USER_ID in .env is the Facebook Page id; using the Instagram account "
+                            "linked to that Page instead (put the Instagram account id in .env to stop this note)")
+        except Exception as exc:  # noqa: BLE001 - offline: keep the id as it is, ask again next run
+            _resolved.pop(key, None)
+            log.debug(f"instagram id check: {str(exc)[:120]}")
+    return _resolved.get(key, ig)
 
 
 def build_caption(job, settings) -> str:

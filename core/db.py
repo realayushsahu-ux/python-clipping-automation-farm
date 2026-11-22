@@ -141,6 +141,9 @@ class DB:
         for col in ("next_try", "claimed_at", "note"):          # Phase 6
             if col not in have:
                 self.conn.execute(f"ALTER TABLE posts ADD COLUMN {col} TEXT")
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(videos)")}
+        if "voiceover" not in have:                                # per-video narrator choice (Sheet)
+            self.conn.execute("ALTER TABLE videos ADD COLUMN voiceover TEXT")
         have = {r[1] for r in self.conn.execute("PRAGMA table_info(stats)")}
         for col, kind in (("feed_views", "INTEGER"), ("watched_pct", "REAL")):   # YouTube Analytics
             if col not in have:
