@@ -17,16 +17,23 @@ class FarmError(Exception):
 
 
 def retry(fn, *args, attempts=3, waits=(10, 60, 300), what="task", **kwargs):
-    last = None
-    for i in range(attempts):
+    from core import net
+    last, i, waited = None, 0, 0
+    while i < attempts:
         try:
             return fn(*args, **kwargs)
         except PermanentError:
             raise
         except Exception as exc:  # noqa: BLE001 - every other error is worth another try
             last = exc
+            if waited < 5 and not net.online():       # internet is down: wait for it, this try does not count
+                waited += 1
+                log.warning(f"{what}: no internet, waiting for it to come back")
+                net.wait_online()
+                continue
             if i + 1 < attempts:
                 wait = waits[min(i, len(waits) - 1)]
                 log.warning(f"{what} failed ({str(exc)[:160]}); retry {i + 2}/{attempts} in {wait}s")
                 time.sleep(wait)
+            i += 1
     raise FarmError(f"{what} failed after {attempts} attempts: {last}") from last

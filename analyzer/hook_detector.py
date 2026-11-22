@@ -171,6 +171,7 @@ def find_moments(transcript, loud_rel, chat, info, settings, workdir, clips_want
     chosen.sort(key=lambda m: -float(m.get("score", 0)))
     log.info(f"picked {len(chosen)} of {len(cands)} candidate moments "
              f"({len(strong)} scored â‰¥ {settings['min_score']})")
-    cache.write_text(json.dumps(chosen, indent=1, ensure_ascii=False), encoding="utf-8")
+    from core.safe_io import write_json
+    write_json(cache, chosen, indent=1, ensure_ascii=False)
     (workdir / "candidates.json").write_text(json.dumps(cands, indent=1, ensure_ascii=False), encoding="utf-8")
     return chosen

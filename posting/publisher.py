@@ -5,7 +5,8 @@
   Retryable error  → failed, tried again after a wait (max posting_max_attempts, then needs you)
   Permanent error  → needs_manual (fix the cause, then type retry in Ready to Post → Approve)
   Ambiguous error  → needs_manual (may be live: check the channel, type posted or retry)
-  stuck "publishing" (farm crashed mid-upload) → needs_manual after posting_stuck_minutes
+  stuck "publishing" (farm stopped mid-upload) → the farm checks the channel: live → posted, not there → again;
+                    only if it cannot check for posting_stuck_minutes → needs_manual
 """
 
 import json
@@ -43,12 +44,80 @@ def job_for(clip) -> dict:
             "pin_comment": p.get("pin_comment") or "", "hook": clip.get("hook")}
 
 
-def recover_stuck(settings) -> int:
+LIVE_CHECK = None         # tests put a fake here: fn(post, clip) -> {"external_id", "url"} | None
+_first_round = True       # the first round after the farm (re)started: every "publishing" post is left over
+_STARTED = datetime.now().isoformat()   # a post claimed before this farm run started was cut off by the restart
+
+
+def find_live(p, clip):
+    """Is a post that was cut off mid-upload (power cut, crash) live after all? Reads the newest uploads of
+    the channel with the official APIs (read only) and matches the title / first caption line."""
+    if LIVE_CHECK:
+        return LIVE_CHECK(p, clip)
+    if PUBLISHERS:
+        raise RuntimeError("no live check in tests")
+    job = job_for(clip)
+    if p["platform"] == "youtube":
+        from growth.analytics import fetch_youtube
+        title = (job.get("youtube_title") or job.get("hook") or clip["clip_id"]).replace("<", "").replace(">", "")
+        title = title.strip()[:100]
+        for r in fetch_youtube(limit=25):
+            if r["title"].strip() == title:
+                return {"external_id": r["external_id"], "url": r["url"]}
+        return None
+    if p["platform"] == "instagram":
+        import requests
+        from posting.instagram import _cfg, build_caption
+        c = _cfg()
+        first = build_caption(job, {}).split("\n")[0].strip()[:100]
+        r = requests.get(f"https://{c['host']}/{c['ver']}/{c['ig']}/media", timeout=30, params={
+            "fields": "id,caption,permalink", "limit": 25, "access_token": c["token"]}).json()
+        if "error" in r:
+            raise RuntimeError(str(r["error"].get("message"))[:200])
+        for m in r.get("data", []):
+            if first and (m.get("caption") or "").split("\n")[0].strip()[:100] == first:
+                return {"external_id": m["id"], "url": m.get("permalink", "")}
+        return None
+    raise RuntimeError(f"no live check for {p['platform']}")
+
+
+def recover_stuck(settings, startup=False) -> int:
+    """Posts left in "publishing" because the farm stopped mid-upload (PC off, crash, closed window).
+    The farm looks at the channel itself: live → recorded as posted; not there → uploaded again.
+    Only when it cannot look (no internet / API error) for posting_stuck_minutes does it ask you."""
     db = get_db()
     limit = (datetime.now() - timedelta(minutes=int(settings.get("posting_stuck_minutes", 120)))).isoformat()
+    settle = (datetime.now() - timedelta(minutes=10)).isoformat()   # never judge an upload younger than this
     n = 0
     for p in db.posts("publishing"):
-        if (p.get("claimed_at") or "") < limit:
+        claimed = p.get("claimed_at") or ""
+        # judged at start, once it is older than posting_stuck_minutes, or (found 2026-11-21: a window closed
+        # 6 minutes into an upload left it waiting 2 hours) as soon as it settled when an earlier run claimed it
+        if not (startup or claimed < limit or claimed < _STARTED) or claimed > settle:
+            continue
+        clip = db.get_clip(p["clip_id"])
+        try:
+            live = find_live(p, clip) if clip else None
+        except Exception as exc:  # noqa: BLE001 - could not look: try again next round, ask you only later
+            log.warning(f"{p['clip_id']} {p['platform']}: cut-off upload, could not check the channel: {str(exc)[:150]}")
+            live = "unknown"
+        if live == "unknown":
+            if claimed >= limit:
+                continue
+        elif live:
+            queue.record_posted(p["id"], live["external_id"], live["url"])
+            db.event("info", p["clip_id"], "publish", f"{p['platform']}: upload was cut off but it is live: {live['url']}")
+            log.info(f"{p['clip_id']}: {p['platform']} upload was cut off, but it is live ({live['url']})")
+            n += 1
+            continue
+        else:
+            db.update_post(p["id"], status="failed", next_try=now(), attempts=max(0, int(p.get("attempts") or 1) - 1),
+                           last_error="the farm stopped during the upload; it is not on the channel, uploading again")
+            db.event("info", p["clip_id"], "publish", f"{p['platform']}: cut-off upload not live, trying again")
+            log.info(f"{p['clip_id']}: {p['platform']} upload was cut off and is not live; uploading it again")
+            n += 1
+            continue
+        if claimed < limit:
             db.update_post(p["id"], status="needs_manual",
                            last_error="the farm stopped during the upload: check the channel, then type "
                                       "posted (it is there) or retry (it is not) in Ready to Post → Approve")
@@ -99,7 +168,10 @@ def publish_one(post_id, settings) -> str:
             db.event("warning", c["clip_id"], "publish", f"{p['platform']}: no internet, next try {nxt[11:16]}")
             _clip_back(c["clip_id"])
             return "failed"
-        if attempts >= int(settings.get("posting_max_attempts", 3)):
+        most = int(settings.get("posting_max_attempts", 3))
+        if "still processing" in str(exc) or "network error" in str(exc):
+            most *= 2                   # Instagram's slow side or an internet blink: nothing is wrong with the clip
+        if attempts >= most:
             return _manual(p, f"gave up after {attempts} tries: {exc}")
         nxt = (datetime.now() + timedelta(minutes=exc.wait_minutes * attempts)).isoformat(timespec="seconds")
         db.update_post(post_id, status="failed", last_error=str(exc)[:900], next_try=nxt)
@@ -187,7 +259,15 @@ def publish_due(settings) -> dict:
     """One round: recover stuck uploads, then publish everything that is due (oldest first)."""
     if not settings.get("posting_enabled", False):
         return {"disabled": True}
-    rep = {"stuck": recover_stuck(settings)}
+    from core import net
+    if not net.online():                          # no internet: post nothing (no try is used up), check again later
+        if not net.OFFLINE.exists():
+            net.OFFLINE.write_text(now(), encoding="utf-8")
+        return {"offline": True}
+    net.OFFLINE.unlink(missing_ok=True)
+    global _first_round
+    rep = {"stuck": recover_stuck(settings, startup=_first_round and not PUBLISHERS)}
+    _first_round = False
     if queue.reschedule_missed(settings):         # late clips → next free time, before anything is posted
         queue.plan_posts(settings)
     for p in sorted(due_posts(settings), key=lambda x: x.get("scheduled_at") or ""):

@@ -154,6 +154,29 @@ def main():
     assert publisher.recover_stuck(st) == 1
     assert db.get_post(pb["youtube"]["id"])["status"] == "needs_manual"
 
+    # 6a. (2026-11-21) power cut mid-upload: when the farm starts again it looks at the channel itself.
+    #     live → posted (never uploaded twice); not there → uploaded again; a fresh upload is never judged
+    pid = pb["youtube"]["id"]
+    old = (datetime.now() - timedelta(minutes=30)).isoformat(timespec="seconds")
+    db.update_post(pid, status="publishing", claimed_at=old)
+    publisher.LIVE_CHECK = lambda p, clip: None                       # not on the channel
+    assert publisher.recover_stuck(st, startup=True) == 1
+    assert db.get_post(pid)["status"] == "failed" and db.get_post(pid)["next_try"], "not live → try again"
+    db.update_post(pid, status="publishing", claimed_at=datetime.now().isoformat(timespec="seconds"))
+    assert publisher.recover_stuck(st, startup=True) == 0, "an upload younger than 10 min is left alone"
+    db.update_post(pid, claimed_at=old)
+    publisher.LIVE_CHECK = lambda p, clip: {"external_id": "ytLIVE", "url": "https://youtube.com/shorts/ytLIVE"}
+    assert publisher.recover_stuck(st, startup=True) == 1
+    assert db.get_post(pid)["status"] == "posted" and db.get_post(pid)["url"].endswith("ytLIVE"), "live → posted"
+    db.update_post(pid, status="publishing", claimed_at=old)
+    def offline(p, clip):
+        raise OSError("no internet")
+    publisher.LIVE_CHECK = offline
+    assert publisher.recover_stuck(st, startup=True) == 0 and db.get_post(pid)["status"] == "publishing", \
+        "cannot look yet → wait, do not guess"
+    publisher.LIVE_CHECK = None
+    db.update_post(pid, status="posted")
+
     # 6b. PC was off at the post time and comes back 40 min later → not posted late, moved to the next time
     publisher.PUBLISHERS = {"youtube": Fake(), "instagram": Fake()}
     late = make_clip(db, 3, later)
@@ -259,6 +282,11 @@ def main():
                           sleep=lambda s: None, prepare=lambda p: p)
     instagram.upload_chunks = real
     assert seen == [4 * 1024 * 1024, 1024 * 1024], seen
+    # Instagram stuck on one upload + an internet blink: a fresh upload is sent and the post still goes out
+    sess = FakeGraph(stuck_first=True, blink=True)
+    out = instagram.publish({**PKG, "clip_id": a, "file": str(video)}, st, session=sess, sleep=lambda s: None,
+                            prepare=lambda p: p)
+    assert sess.n == 2 and out["external_id"] == "M1", (sess.n, out)
     sess = FakeGraph(publish_fails=True)
     try:
         instagram.publish({**PKG, "clip_id": a, "file": str(video)}, st, session=sess, sleep=lambda s: None,
@@ -285,8 +313,9 @@ class _R:
 
 
 class FakeGraph:
-    def __init__(self, publish_fails=False, token_bad=False, last_piece_fails=False):
-        self.log, self.polls, self.got = [], 0, 0
+    def __init__(self, publish_fails=False, token_bad=False, last_piece_fails=False, stuck_first=False, blink=False):
+        self.log, self.polls, self.got, self.n = [], 0, 0, 0
+        self.stuck_first, self.blink = stuck_first, blink
         self.publish_fails, self.token_bad, self.last_piece_fails = publish_fails, token_bad, last_piece_fails
 
     def post(self, url, data=None, headers=None, timeout=None):
@@ -295,7 +324,9 @@ class FakeGraph:
             return _R(400, {"error": {"code": 190, "message": "Error validating access token"}})
         if url.endswith("/media"):
             assert data["media_type"] == "REELS" and data["upload_type"] == "resumable"
-            return _R(200, {"id": "C1", "uri": "https://rupload.facebook.com/ig-api-upload/v23.0/C1"})
+            self.n += 1
+            self.got = 0
+            return _R(200, {"id": f"C{self.n}", "uri": f"https://rupload.facebook.com/ig-api-upload/v23.0/C{self.n}"})
         if "rupload" in url:
             assert isinstance(data, bytes) and int(headers["offset"]) == self.got
             self.got += len(data)
@@ -316,7 +347,13 @@ class FakeGraph:
 
     def get(self, url, params=None, timeout=None):
         self.log.append(("GET", url, {}))
-        if url.endswith("/C1"):
+        if self.blink:                          # the home internet blinks once
+            self.blink = False
+            import requests
+            raise requests.ConnectionError("getaddrinfo failed")
+        if url.endswith("/C1") and self.stuck_first:
+            return _R(200, {"status_code": "IN_PROGRESS"})     # Instagram never finishes this one
+        if url.split("/")[-1].startswith("C"):
             self.polls += 1
             return _R(200, {"status_code": "FINISHED" if self.polls >= 2 else "IN_PROGRESS"})
         if url.endswith("/M1"):

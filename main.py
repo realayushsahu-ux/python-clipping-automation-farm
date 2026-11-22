@@ -176,6 +176,7 @@ def main():
     tp.add_argument("--top", type=int, default=10)
     tp.add_argument("--cached", action="store_true", help="show the last result, no new search")
     sub.add_parser("service", help="supervisor: runs watch and restarts it (used by autostart)")
+    sub.add_parser("guard", help="start the farm if it is not running (task ClippingFarmGuard, every 10 min)")
     sub.add_parser("start", help="start the farm in the background")
     sub.add_parser("stop", help="stop the background farm (after the current job)")
     asp = sub.add_parser("autostart", help="start the farm with Windows + wake the PC for posting")
@@ -190,7 +191,7 @@ def main():
     return {"doctor": cmd_doctor, "process": cmd_process, "run": cmd_run, "status": cmd_status,
             "remake": cmd_remake, "sheets": cmd_sheets, "watch": cmd_watch, "posted": cmd_posted,
             "serve": cmd_serve, "auth": cmd_auth, "publish": cmd_publish,
-            "service": cmd_service, "stats": cmd_stats, "trends": cmd_trends, "audit": cmd_audit, "retitle": cmd_retitle, "start": cmd_start, "stop": cmd_stop, "autostart": cmd_autostart}[a.cmd](a)
+            "service": cmd_service, "stats": cmd_stats, "trends": cmd_trends, "audit": cmd_audit, "retitle": cmd_retitle, "start": cmd_start, "stop": cmd_stop, "guard": cmd_guard, "autostart": cmd_autostart}[a.cmd](a)
 
 
 def cmd_sheets(a):
@@ -223,6 +224,36 @@ def cmd_sheets(a):
     return 0
 
 
+def _power_cut_safety():
+    """Runs each time the farm starts, so a power cut / crash / closed window never loses work:
+    a copy of the database, damaged half-written files made again, half-done videos carried on."""
+    from core import service
+    from core.paths import video_workdir
+    from core.safe_io import heal_folder
+    wlog = get_logger("watch")
+    for name in ("backup_db", "backup_settings", "clean_tmp"):
+        job = getattr(service, name, None)
+        try:
+            if job:
+                job()
+        except Exception as exc:  # noqa: BLE001 - a backup problem never stops the farm
+            wlog.warning(f"{name}: {exc}")
+    db = get_db()
+    for v in db.videos("new", "retry", "downloading", "transcribing", "analyzing", "editing", "failed"):
+        try:
+            n = heal_folder(video_workdir(v["video_id"]))
+        except Exception:  # noqa: BLE001
+            n = 0
+        if v["status"] in ("downloading", "transcribing", "analyzing", "editing"):
+            # stopped in the middle (PC off, crash, update): carry on where it was. Download, transcript
+            # (saved every minute), moments and finished clips are kept, so only the last minute is redone.
+            db.update_video(v["video_id"], status="retry", stage_detail="resuming after a restart")
+            wlog.info(f"{v['video_id']}: was {v['status']} when the farm stopped; resuming")
+        elif v["status"] == "failed" and (n or "JSONDecodeError" in (v.get("last_error") or "")):
+            db.update_video(v["video_id"], status="retry", last_error=None, stage_detail="resuming after a restart")
+            wlog.info(f"{v['video_id']}: failed on a damaged file ({n} repaired); trying again")
+
+
 def cmd_watch(_):
     """The farm's main loop. A background thread syncs the sheet every sheet_poll_seconds,
     the main thread does the heavy work (videos, remakes) one at a time. Ctrl+C to stop."""
@@ -235,6 +266,7 @@ def cmd_watch(_):
         print("the farm is already running (" + service.describe() + ")")
         return 3
     from core.pipeline import process_video, remake_clip
+    _power_cut_safety()
     use_sheet = bool(env("GOOGLE_SHEET_ID"))
     stop = threading.Event()
     synced = threading.Event()                         # first Sheet sync done (Settings tab applied)
@@ -303,6 +335,8 @@ def cmd_watch(_):
                 service.beat(posting_enabled=bool(settings.get("posting_enabled")), awake=awake,
                              next_post=service.next_post_time(settings, posts))
                 service.refresh_autostart(settings)
+                service.backup_db()                      # one copy a day, last 7 kept
+                service.backup_settings()                # settings + logins, one zip a day, last 14 kept
             except Exception as exc:  # noqa: BLE001
                 log.error(f"heartbeat: {str(exc)[:300]}")
             stop.wait(30)
@@ -322,10 +356,25 @@ def cmd_watch(_):
         print(f"Folder links: {clip_server.base_url(settings)}/clip/CLIPxxxx")
     db = get_db()
     last_q = 0
+    code_v, last_code, reload, last_low = service.code_version(), time.time(), False, 0.0
+    last_heal = 0
     if not service.is_locked(service.SUP_LOCK):      # started by hand: an old stop flag must not stop it
         service.STOP.unlink(missing_ok=True)
     try:
         while not service.STOP.exists():
+            if service.is_locked(service.SUP_LOCK) and time.time() - last_code > 60:
+                last_code = time.time()                # code updated → restart between videos, never in the middle
+                if service.code_version() != code_v:
+                    log.info("farm code changed: restarting to load it")
+                    reload = True
+                    break
+            if time.time() - last_heal > 1800:          # clips made without the AI / failed: make them again
+                last_heal = time.time()
+                try:
+                    from core.pipeline import heal_clips
+                    heal_clips(settings)
+                except Exception as exc:  # noqa: BLE001
+                    log.error(f"heal clips: {str(exc)[:200]}")
             if time.time() - last_q > 60:
                 last_q = time.time()
                 try:
@@ -340,7 +389,12 @@ def cmd_watch(_):
                 except Exception as exc:  # noqa: BLE001
                     db.update_clip(c["clip_id"], status="ready")
                     db.event("error", c["clip_id"], "remake", str(exc))
-            for v in db.videos("new", "retry"):
+            low = service.disk_check() if db.videos("new", "retry") else ""
+            if low:                                    # a full disk mid-edit breaks files: wait, keep posting
+                if time.time() - last_low > 1800:
+                    last_low = time.time()
+                    log.warning(f"disk too full, new videos wait: {low}")
+            for v in ([] if low else db.videos("new", "retry")):
                 busy = True
                 try:
                     process_video(v["video_id"], settings)
@@ -351,14 +405,14 @@ def cmd_watch(_):
                     break
             if not busy:
                 time.sleep(10)
-        print("stopped (main.py stop)")
+        print("restarting to load the updated code" if reload else "stopped (main.py stop)")
     except KeyboardInterrupt:
         print("stopped")
     finally:
         stop.set()
         time.sleep(1)
         lock.release()
-    return 0
+    return service.RELOAD if reload else 0
 
 
 def cmd_stats(a):
@@ -495,6 +549,13 @@ def cmd_trends(a):
         ensure_tabs(io, settings)
         write_trends(io, force=True)
         print("Sheet: Trends tab updated")
+    return 0
+
+
+def cmd_guard(_):
+    ensure_dirs()
+    from core import service
+    print(service.guard())
     return 0
 
 

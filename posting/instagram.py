@@ -138,7 +138,7 @@ def upload_chunks(s, uri, video: Path, token: str, chunk=None):
             fh.seek(off)
             data = fh.read(chunk)
             last = off + len(data) >= size
-            for attempt in range(3):
+            for attempt in range(6):
                 try:
                     r = s.post(uri, data=data, timeout=(30, 300), headers={
                         "Authorization": f"OAuth {token}", "offset": str(off), "file_size": str(size)})
@@ -146,9 +146,9 @@ def upload_chunks(s, uri, video: Path, token: str, chunk=None):
                     if last:
                         log.info(f"{video.stem}: no answer to the last upload piece, checking the status")
                         return
-                    if attempt == 2:
+                    if attempt == 5:
                         raise
-                    time.sleep(5)
+                    time.sleep(5)                          # internet blink: send the same piece again
                     continue
                 txt = r.text or ""
                 if r.status_code < 400 or "PartialRequestError" in txt:
@@ -196,34 +196,58 @@ def publish(job, settings, session=None, sleep=time.sleep, prepare=ig_copy) -> d
                  f"{chunk // 1024} KB pieces")
     base = f"https://{c['host']}/{c['ver']}"
     net = (requests.ConnectionError, requests.Timeout)
+
+    def calm(fn, tries=6):
+        """The home internet blinks off for 1-2 s now and then (found 2026-11-21): a request that hits a blink
+        is sent again a few seconds later instead of failing the whole post."""
+        for i in range(tries):
+            try:
+                return fn()
+            except net:
+                if i == tries - 1:
+                    raise
+                sleep(5)
+
+    # Found 2026-11-21: now and then Instagram never finishes processing ONE upload (stays IN_PROGRESS for
+    # hours) although the same video in a new container finishes in a minute. So a container that is still
+    # processing after instagram_fresh_after_s is dropped and the video is sent again in a fresh one.
+    fresh_after = int(settings.get("instagram_fresh_after_s", 240))
+    containers = max(1, int(settings.get("instagram_containers_per_try", 3)))
     try:
-        # 1. container
-        r = s.post(f"{base}/{c['ig']}/media", timeout=60, data={
-            "media_type": "REELS", "upload_type": "resumable", "caption": build_caption(job, settings),
-            "share_to_feed": "true", "access_token": c["token"]})
-        cont = _check(r, "create")
-        cid = cont["id"]
-        uri = cont.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{c['ver']}/{cid}"
-        # 2. upload the bytes
-        upload_chunks(s, uri, video, c["token"], chunk)
-        # 3. wait for Instagram to process it
-        waited, status = 0, ""
-        limit = int(settings.get("instagram_processing_timeout_s", 600))
-        while waited <= limit:
-            r = s.get(f"{base}/{cid}", params={"fields": "status_code,status", "access_token": c["token"]},
-                      timeout=30)
-            st = _check(r, "status")
-            status = st.get("status_code", "")
-            if status == "FINISHED":
-                break
-            if status in ("ERROR", "EXPIRED"):
-                raise Retryable(f"Instagram could not process the video: {st.get('status') or status}", 30)
+        for n in range(1, containers + 1):
+            # 1. container
+            r = calm(lambda: s.post(f"{base}/{c['ig']}/media", timeout=60, data={
+                "media_type": "REELS", "upload_type": "resumable", "caption": build_caption(job, settings),
+                "share_to_feed": "true", "access_token": c["token"]}))
+            cont = _check(r, "create")
+            cid = cont["id"]
+            uri = cont.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{c['ver']}/{cid}"
+            # 2. upload the bytes
+            upload_chunks(s, uri, video, c["token"], chunk)
+            # 3. wait for Instagram to process it
+            waited, status = 0, ""
+            limit = fresh_after if n < containers else int(settings.get("instagram_processing_timeout_s", 600))
+            while waited <= limit:
+                r = calm(lambda: s.get(f"{base}/{cid}", params={"fields": "status_code,status",
+                                                                "access_token": c["token"]}, timeout=30))
+                st = _check(r, "status")
+                status = st.get("status_code", "")
+                if status in ("FINISHED", "PUBLISHED"):
+                    break
+                if status in ("ERROR", "EXPIRED"):
+                    if n < containers:
+                        break
+                    raise Retryable(f"Instagram could not process the video: {st.get('status') or status}", 30)
+                sleep(10)
+                waited += 10
             if status == "PUBLISHED":
                 raise Ambiguous("container already published")
-            sleep(10)
-            waited += 10
+            if status == "FINISHED":
+                break
+            log.info(f"{job.get('clip_id')}: Instagram stuck on upload {n} ({status or 'no answer'} after "
+                     f"{waited}s); sending it again in a fresh upload")
         if status != "FINISHED":
-            raise Retryable(f"Instagram still processing after {limit}s", 15)
+            raise Retryable(f"Instagram still processing after {containers} uploads", 15)
     except net as exc:
         raise Retryable(f"Instagram network error before publishing: {exc}", 10) from exc
     # 4. publish: from here on a lost answer means "maybe posted"

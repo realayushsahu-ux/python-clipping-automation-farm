@@ -20,6 +20,7 @@ from core.db import get_db
 from core.logger import get_logger
 from core.media import fmt_time
 from core.outputs import write_post_info
+from core import progress
 from core.paths import PROCESSING as PROC_DIR
 from core.paths import READY as READY_DIR
 from google_sheets import tabs as T
@@ -157,7 +158,7 @@ def sync_video_input(io, settings):
             want = {"Video ID": vid, "Status": v["status"], "Title": v.get("title") or "",
                     "Clips Made": str(made) if v["status"] == "done" or made else "",
                     "Added At": _short(v["created_at"]), "Updated At": _short(v["updated_at"]),
-                    "Message": (v.get("last_error") or v.get("stage_detail") or "")[:300]}
+                    "Message": _video_message(db, v)}
         for name, val in want.items():
             c = col.get(name)
             if c is not None and (row[c] if c < len(row) else "") != str(val):
@@ -304,13 +305,20 @@ def _num(x):
     return "" if x is None else (int(x) if float(x).is_integer() else x)
 
 
+def _video_message(db, v) -> str:
+    """Video Input → Message: a progress bar while the farm works on it, else the error / result."""
+    if v["status"] in progress.WORKING or v["status"] in ("new", "retry"):
+        return progress.line(v, db.clips(v["video_id"]))
+    return (v.get("last_error") or v.get("stage_detail") or "")[:300]
+
+
 # --------------------------------------------------------------------- the other (view) tabs
 def write_processing(io):
     db = get_db()
     rows = [T.TABS[T.PROCESSING]["headers"]]
     for v in db.videos("new", "retry", "downloading", "transcribing", "analyzing", "editing"):
-        rows.append([v["video_id"], v.get("title") or v["url"], v["status"], v.get("stage_detail") or "",
-                     v["attempts"], _short(v["updated_at"]), (v.get("last_error") or "")[:300]])
+        rows.append([v["video_id"], v.get("title") or v["url"], v["status"],
+                     progress.line(v, db.clips(v["video_id"])), v["attempts"], _short(v["updated_at"]), (v.get("last_error") or "")[:300]])
     for c in db.clips(None, "rendering", "remake"):
         rows.append([c["clip_id"], c.get("title") or c.get("hook") or "", c["status"],
                      f"{fmt_time(c['start'])}-{fmt_time(c['end'])} of {c['video_id']}", "", _short(c["updated_at"]), ""])
@@ -402,8 +410,22 @@ def write_posted(io, settings):
         s = stats.get((p["platform"], p.get("external_id") or "")) or stats_url.get(p.get("url") or "-") or {}
         rows.append([_short(p.get("posted_at")), p["clip_id"], c.get("title") or "", p["platform"],
                      p.get("url") or "", _n(s.get("views")), _n(s.get("likes")), _n(s.get("comments")),
+                     _feed(p, s), "" if s.get("watched_pct") is None else f"{s['watched_pct']:.0f}%",
                      folder_link(settings, p["clip_id"])])
     io.write_all(T.POSTED, rows)
+
+
+def _feed(p, s):
+    """YouTube only: views from the Shorts feed. 0 after 3+ days = YouTube did not show it in the feed."""
+    if p["platform"] != "youtube" or s.get("feed_views") is None:
+        return ""
+    try:
+        age = (datetime.now() - datetime.fromisoformat(str(p.get("posted_at"))[:19])).days
+    except ValueError:
+        age = 0
+    if s["feed_views"] == 0:
+        return "0 (not shown in feed)" if age >= 3 else "0 (YouTube data is 2-3 days late)"
+    return s["feed_views"]
 
 
 def _n(x):

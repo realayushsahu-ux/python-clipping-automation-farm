@@ -59,8 +59,8 @@ TABS = {
     POSTED: {
         # Post URL: paste the link here for clips you posted by hand
         "headers": ["Posted At", "Clip ID", "YouTube Title", "Platform", "Post URL", "Views", "Likes", "Comments",
-                    "Watch"],
-        "widths": [130, 90, 320, 90, 320, 70, 70, 80, 130],
+                    "Shorts Feed Views", "Watched %", "Watch"],
+        "widths": [130, 90, 320, 90, 320, 70, 70, 80, 140, 90, 130],
         "typed": [5],
     },
     FAILED: {

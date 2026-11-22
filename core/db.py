@@ -141,6 +141,10 @@ class DB:
         for col in ("next_try", "claimed_at", "note"):          # Phase 6
             if col not in have:
                 self.conn.execute(f"ALTER TABLE posts ADD COLUMN {col} TEXT")
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(stats)")}
+        for col, kind in (("feed_views", "INTEGER"), ("watched_pct", "REAL")):   # YouTube Analytics
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE stats ADD COLUMN {col} {kind}")
 
     @contextmanager
     def tx(self):
@@ -272,7 +276,7 @@ class DB:
     # ---------------------------------------------------------------- stats (Phase 8)
     def save_stat(self, row: dict):
         cols = ["platform", "external_id", "clip_id", "title", "url", "published_at", "duration_s", "views",
-                "likes", "comments", "shares", "saves", "checked_at"]
+                "likes", "comments", "shares", "saves", "checked_at", "feed_views", "watched_pct"]
         vals = [row.get(c) for c in cols]
         with self.tx() as c:
             c.execute(f"INSERT INTO stats({','.join(cols)}) VALUES ({','.join('?' * len(cols))}) "

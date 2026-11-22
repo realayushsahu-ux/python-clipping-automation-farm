@@ -198,8 +198,15 @@ class GoogleSheet(SheetIO):
     def update_cells(self, tab, cells):
         if not cells:
             return
-        data = [{"range": f"{col_letter(c)}{r}", "values": [["" if v is None else v]]} for r, c, v in cells]
-        self._call(self.ws(tab).batch_update, data, raw=True)
+        ws = self.ws(tab)
+
+        def send():
+            # built fresh on every try: gspread writes the tab name INTO these dicts, so re-sending the same
+            # list after a network hiccup asked for 'Ready to Post'!'Ready to Post'!E2 and failed (2026-11-20)
+            data = [{"range": f"{col_letter(c)}{r}", "values": [["" if v is None else v]]} for r, c, v in cells]
+            return ws.batch_update(data, raw=True)
+
+        self._call(send)
 
 
 def open_sheet() -> SheetIO:

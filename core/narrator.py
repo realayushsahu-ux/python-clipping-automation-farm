@@ -13,6 +13,7 @@ import json
 import time
 from datetime import datetime
 
+from core import progress
 from core.db import get_db
 from core.logger import get_logger
 
@@ -64,6 +65,8 @@ class Narrator:
         self.videos, self.clips, self.posts = {}, {}, {}
         self.posting = None
         self.last_next = None
+        self.bars = {}                       # video_id -> last progress line shown
+        self.offline = False
 
     # ------------------------------------------------------------------ reading
     def _read(self):
@@ -105,7 +108,7 @@ class Narrator:
         say("Clipping Farm started. " + self._posting_text())
         busy = [v for v in self.videos.values() if v["status"] in ("new", "retry", *VIDEO_STAGE)]
         for v in busy:
-            say(f"Video waiting to be edited: {short(v.get('title') or v['url'], 80)}")
+            self._bar(v, self.clips)
         self._say_next(self.posts, self.clips, force=True)
 
     def _posting_text(self):
@@ -116,6 +119,20 @@ class Narrator:
     def step(self):
         videos, clips, posts = self._read()
         changed = False
+
+        from core.net import OFFLINE
+        offline = OFFLINE.exists()
+        if offline != self.offline:
+            self.offline = offline
+            say("No internet. The farm is waiting for it (nothing is lost, it carries on by itself)."
+                if offline else "Internet is back. Carrying on.")
+
+        from core.service import LOW_DISK
+        low = LOW_DISK.read_text(encoding="utf-8") if LOW_DISK.exists() else ""
+        if low != getattr(self, "low", ""):
+            self.low = low
+            say(f"Disk almost full ({low}). New videos wait until you free some space; posting carries on."
+                if low else "Disk space is OK again. Carrying on with videos.")
 
         posting = bool(self.settings.get("posting_enabled"))
         if posting != self.posting:
@@ -130,14 +147,16 @@ class Narrator:
             st = v["status"]
             if st in ("new", "retry") and not old:
                 say(f"New video link added: {name}")
-            elif st in VIDEO_STAGE:
-                say(f"{name}: {VIDEO_STAGE[st]}...")
             elif st == "done":
                 made = [c for c in clips.values() if c["video_id"] == vid
                         and c["status"] not in ("planned", "rejected", "qc_failed")]
                 say(f"Finished editing {name}: {len(made)} clip{'s' if len(made) != 1 else ''} made.")
             elif st == "failed":
                 say(f"Could not finish {name}: {short(v.get('last_error') or 'see logs/farm.log', 100)}")
+
+        for v in videos.values():
+            if v["status"] in progress.WORKING:
+                self._bar(v, clips)
 
         new_sched = {}
         for cid, c in clips.items():
@@ -183,6 +202,14 @@ class Narrator:
         self.videos, self.clips, self.posts = videos, clips, posts
         self._say_next(posts, clips, force=False)
         return changed
+
+    def _bar(self, v, clips):
+        """Progress bar line, shown again only when it moves."""
+        text = progress.line(v, [c for c in clips.values() if c["video_id"] == v["video_id"]])
+        key = text.split(" (about")[0]       # a new line when the bar moves, not each time the estimate wiggles
+        if self.bars.get(v["video_id"]) != key:
+            self.bars[v["video_id"]] = key
+            say(f"{short(v.get('title') or v['url'], 50)}  {text}")
 
     def run(self, stop, every=15):
         try:

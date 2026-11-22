@@ -16,6 +16,7 @@ from ai.caption_generator import package, romanize_lines, wants_hinglish
 from analyzer import signals, transcript
 from analyzer.hook_detector import find_moments
 from config.settings import clip_max_for, load_presets
+from core import progress
 from core.outputs import archive_old, store_clip, write_post_info
 from posting.slots import assign_post_times
 from core.db import get_db
@@ -91,6 +92,63 @@ def redo_video(video_id, **opts):
 
 
 REMAKE_OK = ("ready", "qc_failed", "failed", "rendered", "planned", "rejected", "approved", "remake")
+
+
+def _ai_works(settings) -> bool:
+    """One tiny question to the AI (a few hundred tokens): is it answering again (spend limit raised...)?"""
+    from ai.base import ask_json, providers
+    if all(p.is_offline for p in providers(settings)):
+        return False
+    try:
+        out = ask_json(settings, "Reply with JSON.", "Say ok.",
+                       {"type": "object", "properties": {"ok": {"type": "string"}}, "required": ["ok"],
+                        "additionalProperties": False}, max_tokens=200, offline_fn=lambda: {"_offline": True},
+                       voice=False)
+        return bool(out) and not out.get("_offline")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def heal_clips(settings) -> list:
+    """Clips that came out wrong for a passing reason get made again by themselves (found 2026-11-21):
+      * made while the AI was not answering (OpenAI spend limit): generic title, no on-screen hook.
+        Remade with the AI once it answers again, if the clip is not due to post within 90 minutes.
+      * failed while editing (e.g. ffmpeg 'Broken pipe'): one more try after its video is finished.
+    Each clip is healed at most twice. Returns the clip IDs sent to remake."""
+    db = get_db()
+    counts = {}
+    for e in db.events("info", 3000):
+        if e.get("stage") == "heal":
+            counts[e["item"]] = counts.get(e["item"], 0) + 1
+    soon = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + 90 * 60))
+    offline, broken = [], []
+    for c in db.clips(None, "ready", "approved", "failed"):
+        if counts.get(c["clip_id"], 0) >= 2:
+            continue
+        v = db.get_video(c["video_id"])
+        if not v:
+            continue
+        if c["status"] == "failed":
+            if v["status"] == "done":
+                broken.append(c)
+            continue
+        f = video_workdir(c["video_id"]) / f"{c['clip_id']}_package.json"
+        try:
+            pkg = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        except (OSError, ValueError):
+            pkg = {}
+        if pkg.get("_offline") and (not c.get("post_time") or c["post_time"] > soon):
+            offline.append(c)
+    if offline and not _ai_works(settings):
+        offline = []
+    out = []
+    for c, why in [(c, "made without the AI; the AI answers again") for c in offline] + \
+                  [(c, "failed while editing; one more try") for c in broken]:
+        db.update_clip(c["clip_id"], status="remake")
+        db.event("info", c["clip_id"], "heal", why)
+        log.info(f"{c['clip_id']}: {why} → making it again")
+        out.append(c["clip_id"])
+    return out
 
 
 def remake_clip(clip_id, settings, repackage=True):
@@ -251,7 +309,7 @@ def _run(v, settings):
     audio = retry(dl.download_audio, url, src_dir, attempts=tries, waits=waits, what="audio download")
 
     # ---------------------------------------------------------------- listen
-    db.update_video(vid, status="transcribing", stage_detail="transcript")
+    db.update_video(vid, status="transcribing", stage_detail="language")
     total = float(info.get("duration") or 0) or None
     sec = parse_section(v.get("section") or "")
     lo, hi = (sec if sec else (0.0, total or 1e9))
@@ -264,7 +322,15 @@ def _run(v, settings):
     if (hi - lo) / 60 > float(settings.get("focus_scan_over_minutes", 150)):
         # a 10-hour stream cannot be fully transcribed on a CPU in time: listen where chat/voice spiked
         windows = signals.focus_windows(loud, chat, lo, hi, budget_s=float(settings.get("focus_scan_minutes", 90)) * 60)
-    tr = transcript.scan(audio, lo, hi, work, settings, None if lang == "auto" else lang, windows)
+    last = [0.0]
+
+    def heard(done, total, eta):
+        if time.time() - last[0] < 20 and done < total:
+            return                                   # the database gets at most one update every 20 s
+        last[0] = time.time()
+        db.update_video(vid, stage_detail=progress.listening_detail(done, total, eta))
+
+    tr = transcript.scan(audio, lo, hi, work, settings, None if lang == "auto" else lang, windows, progress=heard)
     db.update_video(vid, language=tr["language"])
 
     # ---------------------------------------------------------------- pick
@@ -287,7 +353,16 @@ def _run(v, settings):
             continue
         db.update_video(vid, stage_detail=f"clip {i + 1}/{len(moments)} ({cid})")
         try:
-            _make_clip(cid, m, info, tr["language"], url, work, src_dir, settings, presets, v)
+            try:
+                _make_clip(cid, m, info, tr["language"], url, work, src_dir, settings, presets, v)
+            except PermanentError:
+                raise
+            except Exception:  # noqa: BLE001
+                from core import net
+                if net.online():
+                    raise
+                net.wait_online()                    # the internet dropped mid-clip: wait, then make it again
+                _make_clip(cid, m, info, tr["language"], url, work, src_dir, settings, presets, v)
         except Exception as exc:  # noqa: BLE001 - one bad clip must not stop the others
             db.update_clip(cid, status="failed", qc={"error": str(exc)[:500]})
             db.event("error", cid, "editing", f"{exc}\n{traceback.format_exc()[-1500:]}")

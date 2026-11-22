@@ -11,7 +11,7 @@ Posted Reels, and growth/learn.py turns the winners into rules for the AI.
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.db import get_db
 from core.logger import get_logger
@@ -99,6 +99,34 @@ def instagram_views_missing() -> bool:
     return _ig_insights_ok is False
 
 
+def youtube_feed(ids, days=60) -> dict:
+    """{video_id: {"feed_views": n, "watched_pct": x}} from YouTube Analytics (main.py auth youtube-analytics).
+
+    feed_views = views that came from the Shorts feed (swiping), the only place a new channel's Shorts can
+    take off. 0 on a Short that is 2+ days old means YouTube did not show it in the feed at all.
+    YouTube Analytics is about 2-3 days behind. Returns {} when the read-only login is not set up."""
+    from growth.channel_audit import analytics_credentials
+    creds = analytics_credentials()
+    if not creds or not ids:
+        return {}
+    from googleapiclient.discovery import build
+    ya = build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
+    end = datetime.now()
+    q = {"ids": "channel==MINE", "startDate": (end - timedelta(days=days)).strftime("%Y-%m-%d"),
+         "endDate": end.strftime("%Y-%m-%d")}
+    out = {}
+    r = ya.reports().query(**q, dimensions="video", metrics="views,averageViewPercentage", sort="-views",
+                           maxResults=200).execute()
+    for vid, views, pct in r.get("rows") or []:
+        out[vid] = {"watched_pct": round(float(pct), 1) if views else None}
+    for vid in ids:
+        r = ya.reports().query(**q, dimensions="insightTrafficSourceType", metrics="views",
+                               filters=f"video=={vid}").execute()
+        src = {x[0]: x[1] for x in r.get("rows") or []}
+        out.setdefault(vid, {})["feed_views"] = int(src.get("SHORTS", 0))
+    return out
+
+
 def refresh(settings) -> dict:
     """Read both platforms, save, link to farm clips. Returns {"youtube": n, "instagram": n, "errors": [...]}"""
     db = get_db()
@@ -112,6 +140,13 @@ def refresh(settings) -> dict:
             rep["errors"].append(f"{name}: {str(exc)[:200]}")
             log.warning(f"stats {name}: {str(exc)[:200]}")
             continue
+        if name == "youtube":
+            try:
+                feed = youtube_feed([r["external_id"] for r in rows])
+                for row in rows:
+                    row.update(feed.get(row["external_id"]) or {})
+            except Exception as exc:  # noqa: BLE001 - analytics is extra; views still save without it
+                rep["errors"].append(f"youtube analytics: {str(exc)[:200]}")
         for row in rows:
             row["clip_id"] = by_ext.get((name, row["external_id"])) or by_url.get(row["url"])
             db.save_stat({k: v for k, v in row.items() if not k.startswith("_")})

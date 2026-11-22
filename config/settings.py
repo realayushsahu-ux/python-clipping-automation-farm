@@ -19,6 +19,19 @@ os.environ.setdefault("HF_HOME", os.environ.get("HF_HOME") or str(MODELS_DIR / "
 if not os.environ["HF_HOME"]:
     os.environ["HF_HOME"] = str(MODELS_DIR / "hf")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+# Temporary files (Python, Whisper, ffmpeg, yt-dlp) on this drive too: C: is nearly full on this PC and a
+# full C: would stop the farm (and Windows). The folder is emptied of old files on every start.
+from core.paths import SYSTEM as _SYSTEM  # noqa: E402
+_TMP = _SYSTEM / "tmp"
+try:
+    _TMP.mkdir(parents=True, exist_ok=True)
+    for _k in ("TMP", "TEMP", "TMPDIR"):
+        os.environ[_k] = str(_TMP)
+    import tempfile as _tempfile  # noqa: E402
+    _tempfile.tempdir = str(_TMP)
+except OSError:
+    pass
 os.environ.setdefault("PYTHONUTF8", "1")
 
 

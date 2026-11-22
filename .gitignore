@@ -63,3 +63,6 @@ desktop.ini
 # generated at runtime from your own stats / trends (personal data, not code)
 config/winners.md
 config/trends.md
+
+# double-click shortcuts (made by main.py autostart on; contain local paths)
+*.lnk

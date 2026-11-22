@@ -116,5 +116,6 @@
   ],
   "sheet_poll_seconds": 60,
   "keep_source_media": true,
-  "clean_processing_after_days": 7
+  "clean_processing_after_days": 7,
+  "whisper_scan_beam": 1
 }
