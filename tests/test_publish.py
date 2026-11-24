@@ -92,7 +92,7 @@ def main():
     # 1. switch off → nothing happens
     assert publisher.publish_due(st) == {"disabled": True} and yt.calls == ig.calls == 0
     S.sync(io, st)
-    assert "posting off" in io.read(T.READY)[1][5]
+    assert "posting off" in io.read(T.READY)[1][6]
 
     # 2. switch on (Settings tab) → due posts go out, IG fails once (retry later)
     srows = io.read(T.SETTINGS)

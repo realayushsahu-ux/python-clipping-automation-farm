@@ -89,7 +89,7 @@ def plan_posts(settings) -> dict:
             elif p["status"] in LIVE_POST and p["scheduled_at"] != c.get("post_time"):
                 db.update_post(p["id"], scheduled_at=c.get("post_time"))
                 moved += 1
-    for c in db.clips(None, "ready", "rejected", "remake", "qc_failed", "failed"):
+    for c in db.clips(None, "ready", "rejected", "remake", "qc_failed", "failed", "skipped"):
         for p in posts.get(c["clip_id"], []):
             if p["status"] in LIVE_POST:
                 db.update_post(p["id"], status="cancelled")
@@ -165,3 +165,72 @@ def step(settings) -> dict:
     plan = plan_posts(settings)
     retry_moves()
     return {"auto_approved": len(approved), "rescheduled": len(moved), **plan}
+
+
+# ------------------------------------------------------------------ order of the queue (Sheet → Action)
+def _queue(settings):
+    """Approved clips that can still move, in posting order. A clip that is posting / due within
+    lock_minutes_before_post (15) keeps its time, so an upload about to start is never touched."""
+    db = get_db()
+    tz = _tz(settings)
+    lock = (datetime.now(tz) + timedelta(minutes=int(settings.get("lock_minutes_before_post", 15)))).strftime(FMT)
+    busy = {p["clip_id"] for p in db.posts("posted", "publishing")}
+    q = [c for c in db.clips(None, "approved") if c.get("post_time") and c["post_time"] > lock
+         and c["clip_id"] not in busy]
+    return sorted(q, key=lambda c: (c["post_time"], c["clip_id"]))
+
+
+def _apply_order(settings, order, slots):
+    """Give the clips in `order` the times in `slots` (same length, earliest first)."""
+    db = get_db()
+    moved = {}
+    for c, t in zip(order, slots):
+        if c.get("post_time") != t:
+            db.update_clip(c["clip_id"], post_time=t)
+            write_post_info(c["clip_id"])
+            moved[c["clip_id"]] = t
+    return moved
+
+
+def reorder(settings, cid, how) -> dict:
+    """how: 'skip' | 'post next' | 'post last' | 'move up' | 'move down'. The SAME posting times are kept;
+    only which clip gets which changes. Skip: the clip leaves the queue (Skipped tab) and every later clip
+    moves one time earlier, so no slot stays empty. Returns {clip_id: new time}."""
+    db = get_db()
+    q = _queue(settings)
+    ids = [c["clip_id"] for c in q]
+    slots = [c["post_time"] for c in q]
+    c0 = db.get_clip(cid)
+    if how == "skip" and c0 and c0["status"] == "ready":       # not approved yet: nothing to re-time
+        db.update_clip(cid, status="skipped", skipped_at=now(), post_time=None)
+        db.event("info", cid, "skip", "skipped in Google Sheets (Skipped tab)")
+        return {}
+    if cid not in ids:
+        raise ValueError("this clip can't be moved now (posting, due within 15 minutes, or not approved yet)")
+    i = ids.index(cid)
+    c = q.pop(i)
+    if how == "skip":
+        db.update_clip(cid, status="skipped", skipped_at=now(), post_time=None)
+        db.event("info", cid, "skip", "skipped in Google Sheets (Skipped tab)")
+        return _apply_order(settings, q, slots[:len(q)])
+    pos = {"post next": 0, "post last": len(q), "move up": max(0, i - 1), "move down": min(len(q), i + 1)}[how]
+    q.insert(pos, c)
+    db.event("info", cid, "order", f"{how} in Google Sheets")
+    return _apply_order(settings, q, slots)
+
+
+def unskip(settings, cid) -> str:
+    """A skipped clip goes back to the END of the queue: the first free posting time after the last one."""
+    from posting.slots import next_free_slots
+    db = get_db()
+    c = db.get_clip(cid)
+    if not c or c["status"] != "skipped":
+        raise ValueError("not a skipped clip")
+    taken = {x["post_time"] for x in db.clips() if x.get("post_time")
+             and x["status"] in ("ready", "approved", "scheduled", "posting")}
+    last = max(taken) if taken else ""
+    t = next(s for s in next_free_slots(settings, 30 + 4 * len(taken), set(taken)) if s > last)
+    db.update_clip(cid, status="approved", post_time=t, skipped_at=None)
+    write_post_info(cid)
+    db.event("info", cid, "unskip", f"back in the queue from the Skipped tab, posts at {t}")
+    return t

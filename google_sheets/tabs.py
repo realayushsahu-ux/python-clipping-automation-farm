@@ -14,12 +14,14 @@ SETTINGS = "Settings"
 PERFORMANCE = "Performance"
 TRENDS = "Trends"
 AUDIT = "Audit"
+SKIPPED = "Skipped"
 GUIDE = "START HERE"
 
 # tab order in the sheet + tab colour: green = you type here, blue = just look, grey = advanced
-ORDER = [GUIDE, VIDEO_INPUT, SCHEDULE, READY, POSTED, PERFORMANCE, SETTINGS, PROCESSING, FAILED, TRENDS, AUDIT]
+ORDER = [GUIDE, VIDEO_INPUT, SCHEDULE, READY, SKIPPED, POSTED, PERFORMANCE, SETTINGS, PROCESSING, FAILED, TRENDS,
+         AUDIT]
 GREEN, BLUE, GREY, ORANGE = (0.20, 0.66, 0.33), (0.26, 0.52, 0.96), (0.62, 0.62, 0.62), (1.0, 0.6, 0.0)
-TAB_COLORS = {GUIDE: ORANGE, VIDEO_INPUT: GREEN, READY: GREEN, SETTINGS: GREEN, SCHEDULE: BLUE, POSTED: BLUE,
+TAB_COLORS = {GUIDE: ORANGE, VIDEO_INPUT: GREEN, READY: GREEN, SKIPPED: GREEN, SETTINGS: GREEN, SCHEDULE: BLUE, POSTED: BLUE,
               PERFORMANCE: BLUE, PROCESSING: GREY, FAILED: GREY, TRENDS: GREY, AUDIT: GREY}
 
 TABS = {
@@ -44,14 +46,26 @@ TABS = {
         "widths": [110, 280, 110, 220, 70, 130, 320],
     },
     READY: {
-        # you type: Approve (yes / no / remake / posted), Post Time (YYYY-MM-DD HH:MM), Notes
+        # you type: Action (skip / post next / post last / move up / move down), Approve (yes / no / remake /
+        # posted), Post Time (YYYY-MM-DD HH:MM), Notes. Rows are in posting order (next post first).
         # Watch = link: plays the clip (needs `main.py watch` or `serve`); details are on the right
-        "headers": ["Clip ID", "Watch", "YouTube Title", "Post Time", "Approve", "Status", "Notes", "Length (s)",
-                    "Instagram Caption", "Hashtags", "YouTube Description", "Pin Comment", "On-screen Hook",
-                    "Platforms", "Score", "Kind", "Creator", "Video ID"],
-        "widths": [90, 130, 300, 130, 80, 150, 220, 70, 300, 260, 300, 240, 200, 130, 60, 80, 110, 110],
-        "dropdowns": {5: ["yes", "no", "remake", "posted", "retry"]},
-        "typed": [4, 5, 7],
+        "headers": ["Clip ID", "Watch", "YouTube Title", "Post Time", "Action", "Approve", "Status", "Notes",
+                    "Length (s)", "Instagram Caption", "Hashtags", "YouTube Description", "Pin Comment",
+                    "On-screen Hook", "Platforms", "Score", "Kind", "Creator", "Video ID"],
+        "widths": [90, 130, 300, 130, 100, 80, 150, 220, 70, 300, 260, 300, 240, 200, 130, 60, 80, 110, 110],
+        "dropdowns": {5: ["skip", "post next", "post last", "move up", "move down"],
+                      6: ["yes", "no", "remake", "posted", "retry"]},
+        "typed": [4, 5, 6, 8],
+    },
+    SKIPPED: {
+        # clips you skipped in Ready to Post (Action = skip). Ready to Post = yes → it goes back to the END of
+        # the queue with the next free time. Nothing is deleted; the clip waits here as long as you like.
+        "headers": ["Clip ID", "Watch", "YouTube Title", "Ready to Post", "Skipped At", "Instagram Caption",
+                    "Hashtags", "YouTube Description", "Pin Comment", "On-screen Hook", "Length (s)", "Score",
+                    "Creator", "Video ID"],
+        "widths": [90, 130, 300, 110, 130, 300, 260, 300, 240, 200, 70, 60, 110, 110],
+        "dropdowns": {4: ["yes"]},
+        "typed": [4],
     },
     SCHEDULE: {
         # one row per clip, next post first (view only: change times in Ready to Post)

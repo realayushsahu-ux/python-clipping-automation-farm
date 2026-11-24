@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS stats_history (
 
 VIDEO_STATUSES = ("new", "retry", "downloading", "transcribing", "analyzing", "editing", "done", "failed")
 CLIP_STATUSES = ("planned", "rendering", "rendered", "qc_failed", "ready", "approved", "rejected",
-                 "scheduled", "posting", "posted", "manual_post", "failed", "remake")
+                 "scheduled", "posting", "posted", "manual_post", "failed", "remake", "skipped")
 POST_STATUSES = ("scheduled", "publishing", "posted", "failed", "needs_manual", "cancelled")
 
 _LOCK = threading.RLock()
@@ -134,7 +134,7 @@ class DB:
     def _migrate(self):
         """Add columns introduced after the first release (old databases keep working)."""
         have = {r[1] for r in self.conn.execute("PRAGMA table_info(clips)")}
-        for col in ("post_time", "folder", "creator", "sheet_approve", "sheet_time"):
+        for col in ("post_time", "folder", "creator", "sheet_approve", "sheet_time", "skipped_at"):
             if col not in have:
                 self.conn.execute(f"ALTER TABLE clips ADD COLUMN {col} TEXT")
         have = {r[1] for r in self.conn.execute("PRAGMA table_info(posts)")}

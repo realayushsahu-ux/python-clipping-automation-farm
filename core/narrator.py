@@ -168,6 +168,8 @@ class Narrator:
                 say(f"{cid} skipped: {short(_qc_error(c) or 'did not pass the quality check', 100)}")
             elif st == "rejected" and old:
                 say(f"{cid} rejected, it will not be posted.")
+            elif st == "skipped":
+                say(f"{cid} skipped (it waits in the Skipped tab; the next clips move up)")
             elif st == "remake":
                 say(f"{cid}: making it again...")
             elif st in ("ready",) and (not old or old["status"] in ("planned", "remake")):

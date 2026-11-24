@@ -64,7 +64,7 @@ def main():
     assert all(p["scheduled_at"] == db.get_clip(p["clip_id"])["post_time"] for p in posts)
     rt = io.read(T.READY)
     h = {x: i for i, x in enumerate(rt[0])}
-    assert rt[0][:6] == ["Clip ID", "Watch", "YouTube Title", "Post Time", "Approve", "Status"], rt[0]
+    assert rt[0][:7] == ["Clip ID", "Watch", "YouTube Title", "Post Time", "Action", "Approve", "Status"], rt[0]
     assert all(r[h["Approve"]] == "yes" and r[h["Status"]].startswith("scheduled") for r in rt[1:]), rt
     assert rt[1][h["Watch"]].startswith("▶ open CLIP")
     assert len(io.read(T.SCHEDULE)) == 4  # one row per clip

@@ -2,7 +2,9 @@
 
   read  Settings tab        → overrides config/settings.json for this run
   read  Video Input         → new links are queued; "retry" / "redo" in Status are honoured
-  read  Ready to Post       → Approve (yes / no / remake / posted) and Post Time edits are applied
+  read  Ready to Post       → Action (skip / post next / post last / move up / move down), Approve
+                              (yes / no / remake / posted) and Post Time edits are applied
+  read  Skipped             → Ready to Post = yes: the clip goes back to the end of the queue
   read  Posted Reels        → Post URL pasted for clips you posted by hand
   run   posting queue       → auto-approve, missed slots, one post per platform (posting/queue.py)
   write every farm column   → Video Input status, Processing, Ready to Post, Posting Schedule,
@@ -222,14 +224,24 @@ def apply_ready_edits(io, settings):
     if not rows:
         return {}
     h = _header_map(rows)
-    done = {"approved": 0, "rejected": 0, "remake": 0, "time": 0, "posted": 0}
+    done = {"approved": 0, "rejected": 0, "remake": 0, "time": 0, "posted": 0, "skipped": 0, "moved": 0}
     notes = {}
+    for row in rows[1:]:                             # Action first, in row order (the farm clears it after)
+        cid = _cell(row, h, "Clip ID").upper()
+        act = _cell(row, h, "Action").lower()
+        if not cid or act not in ("skip", "post next", "post last", "move up", "move down"):
+            continue
+        try:
+            queue.reorder(settings, cid, act)
+            done["skipped" if act == "skip" else "moved"] += 1
+        except ValueError as exc:
+            notes[cid] = f"{act}: {exc}"
     for row in rows[1:]:
         cid = _cell(row, h, "Clip ID").upper()
         c = db.get_clip(cid) if cid else None
-        if not c:
+        if not c or c["status"] == "skipped":
             continue
-        notes[cid] = _cell(row, h, "Notes")
+        notes[cid] = notes.get(cid) or _cell(row, h, "Notes")
         ans = _cell(row, h, "Approve").lower()
         # act only when YOU changed the cell since the farm last wrote it (a finished remake must
         # not start again just because the old word is still in the cell)
@@ -314,13 +326,50 @@ def write_ready(io, settings, notes):
         elif c["status"] == "approved" and mine and not settings.get("posting_enabled", False):
             status = "scheduled (posting off)"
         rows.append([c["clip_id"], folder_link(settings, c["clip_id"]), c.get("title") or "",
-                     c.get("post_time") or "", approve, status, notes.get(c["clip_id"], ""),
+                     c.get("post_time") or "", "", approve, status, notes.get(c["clip_id"], ""),
                      (p.get("qc") or {}).get("duration", ""), p.get("instagram_caption", c.get("caption") or ""),
                      " ".join(p.get("hashtags") or []), p.get("youtube_description", c.get("description") or ""),
                      p.get("pin_comment", ""), c.get("hook") or "",
                      ",".join(p.get("platforms") or settings.get("default_platforms") or []), _num(c.get("score")),
                      c.get("kind") or "", c.get("creator") or p.get("creator") or "", c["video_id"]])
+    old = io.read(T.READY)[:1]
     io.write_all(T.READY, rows)
+    if old and old[0][:len(rows[0])] != rows[0]:     # columns changed by an update (Action, 2026-11-24)
+        spec = T.TABS[T.READY]
+        io.format_tab(T.READY, spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
+    return len(rows) - 1
+
+
+# ------------------------------------------------------------------------------- Skipped
+def apply_skipped_edits(io, settings) -> int:
+    """Skipped tab → Ready to Post = yes: the clip goes back to the end of the queue."""
+    if T.SKIPPED not in io.tabs():
+        return 0
+    rows = io.read(T.SKIPPED)
+    h = _header_map(rows)
+    n = 0
+    for row in rows[1:]:
+        cid = _cell(row, h, "Clip ID").upper()
+        if cid and _cell(row, h, "Ready to Post").lower() in ("yes", "y", "ready"):
+            try:
+                queue.unskip(settings, cid)
+                n += 1
+            except (ValueError, StopIteration) as exc:
+                log.warning(f"{cid}: could not bring back: {exc}")
+    return n
+
+
+def write_skipped(io, settings):
+    db = get_db()
+    rows = [T.TABS[T.SKIPPED]["headers"]]
+    for c in sorted(db.clips(None, "skipped"), key=lambda c: c.get("skipped_at") or "", reverse=True):
+        p = _post_json(c["clip_id"])
+        rows.append([c["clip_id"], folder_link(settings, c["clip_id"]), c.get("title") or "", "",
+                     _short(c.get("skipped_at") or ""), p.get("instagram_caption", c.get("caption") or ""),
+                     " ".join(p.get("hashtags") or []), p.get("youtube_description", c.get("description") or ""),
+                     p.get("pin_comment", ""), c.get("hook") or "", (p.get("qc") or {}).get("duration", ""),
+                     _num(c.get("score")), c.get("creator") or p.get("creator") or "", c["video_id"]])
+    io.write_all(T.SKIPPED, rows)
     return len(rows) - 1
 
 
@@ -583,8 +632,12 @@ GUIDE_HOW = [
     ["1. Add a video", "Video Input tab: paste a YouTube/Twitch link in the URL column. That's all. "
                        "The farm downloads it, finds the best moments and edits the clips by itself."],
     ["2. Check the clips", "Ready to Post tab: click the Watch link to play a clip. "
+                           "Action column: skip = not now (it waits in the Skipped tab, the next clips move up), "
+                           "post next / post last / move up / move down = change the order (the times stay). "
                            "Approve column: no = never post it, remake = edit it again. "
                            "Post Time = when it goes out (write it like 2026-11-21 18:00)."],
+    ["   Skipped clips", "Skipped tab: every skipped clip with its caption and hashtags. Ready to Post = yes → "
+                        "it goes back to the end of the queue with the next free time."],
     ["3. Relax", "Clips post by themselves at their time to YouTube Shorts + Instagram Reels. "
                  "Posting Schedule = what goes out next. Posted Reels = links + views of what went out."],
     ["", ""],
@@ -633,9 +686,11 @@ def sync(io, settings):
     read_settings(io, settings)
     vi = sync_video_input(io, settings)
     edits = apply_ready_edits(io, settings)
+    edits.setdefault("done", {})["back"] = apply_skipped_edits(io, settings)
     urls = apply_posted_edits(io)
     q = queue.step(settings)
     n_ready = write_ready(io, settings, edits.get("notes", {}))
+    write_skipped(io, settings)
     write_processing(io)
     write_schedule(io, settings)
     write_guide(io, settings)
