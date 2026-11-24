@@ -187,10 +187,15 @@ class GoogleSheet(SheetIO):
         rows = [r + [""] * (width - len(r)) for r in rows]
         self._fit_cols(ws, width)
         self._call(ws.update, values=rows, range_name="A1", raw=True)
-        links = [{"range": f"{col_letter(c + 1)}{r + 1}", "values": [[v.formula()]]}
-                 for r, row in enumerate(rows) for c, v in enumerate(row) if isinstance(v, Link)]
-        if links:
-            self._call(ws.batch_update, links, raw=False)
+        where = [(r, c, v) for r, row in enumerate(rows) for c, v in enumerate(row) if isinstance(v, Link)]
+
+        def send_links():
+            # built fresh on every try, like update_cells: a retry of the same list sent
+            # 'Ready to Post'!'Ready to Post'!B2 and failed (2026-11-23, the Watch links)
+            return ws.batch_update([{"range": f"{col_letter(c + 1)}{r + 1}", "values": [[v.formula()]]}
+                                    for r, c, v in where], raw=False)
+        if where:
+            self._call(send_links)
         n = len(rows)
         if ws.row_count > n:
             self._call(ws.batch_clear, [f"A{n + 1}:{col_letter(max(width, ws.col_count))}{ws.row_count}"])
