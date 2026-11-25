@@ -87,6 +87,24 @@ def main():
     assert len(io.read(T.SKIPPED)) == 1, "the Skipped tab is empty again"
     assert [r[0] for r in io.read(T.READY)[1:]][-1] == b, "back at the last row of Ready to Post"
 
+    # 3b. the same Action in the Posting Schedule tab: skip there → gone from the schedule, later ones move up
+    sc = io.read(T.SCHEDULE)
+    hc = {x: i for i, x in enumerate(sc[0])}
+    assert sc[0][3] == "Action", sc[0]
+    before = order()
+    target = before[1]
+    next(r for r in sc[1:] if r[hc["Clip ID"]] == target)[hc["Action"]] = "skip"
+    io.write_all(T.SCHEDULE, sc)
+    S.sync(io, st)
+    assert db.get_clip(target)["status"] == "skipped" and order() == [x for x in before if x != target], order()
+    assert target not in [r[hc["Clip ID"]] for r in io.read(T.SCHEDULE)[1:]]
+    assert all(r[hc["Action"]] == "" for r in io.read(T.SCHEDULE)[1:])
+    sk = io.read(T.SKIPPED)
+    sk[1][hs["Ready to Post"]] = "yes"
+    io.write_all(T.SKIPPED, sk)
+    S.sync(io, st)
+    assert order()[-1] == target
+
     # 4. a clip about to post (within 15 min) can't be moved: note, nothing changes
     soon = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
     db.update_clip(c, post_time=soon)

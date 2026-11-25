@@ -81,7 +81,8 @@ def main():
     assert db.get_clip(c1)["status"] == "approved" and db.get_clip(c1)["post_time"] == "2030-11-19 21:00"
     assert db.get_clip(c2)["status"] == "remake"
     sched = io.read(T.SCHEDULE)
-    assert [(r[2], r[4]) for r in sched[1:]] == [(c1, "Instagram + YouTube")], sched
+    hs_ = {x: i for i, x in enumerate(sched[0])}
+    assert [(r[hs_["Clip ID"]], r[hs_["Where"]]) for r in sched[1:]] == [(c1, "Instagram + YouTube")], sched
     rt = io.read(T.READY)
     assert rt[2][h["Status"]] == "remaking…" or rt[1][h["Status"]] == "remaking…"
 
