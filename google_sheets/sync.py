@@ -236,6 +236,13 @@ def _apply_actions(rows, settings, notes, done):
             notes[cid] = f"{act}: {exc}"
 
 
+def apply_schedule_edits(io, settings, notes, done):
+    """Posting Schedule → Action (the same choices as Ready to Post)."""
+    rows = io.read(T.SCHEDULE)
+    if rows and "action" in [x.strip().lower() for x in rows[0]]:
+        _apply_actions(rows, settings, notes, done)
+
+
 def _write_tab(io, tab, rows):
     """Write a farm tab; when an update changed its columns, its dropdowns / colours are set again."""
     old = io.read(tab)[:1]
@@ -463,10 +470,10 @@ def write_schedule(io, settings):
     pretty = {"youtube": "YouTube", "instagram": "Instagram"}
     for when, c, pls, status, problem in schedule_items(settings):
         when = "" if when == "9999" else when
-        rows.append([when, _day(when), c.get("clip_id", ""), c.get("title") or "",
+        rows.append([when, _day(when), c.get("clip_id", ""), "", c.get("title") or "",
                      " + ".join(pretty.get(x, x) for x in pls), status, folder_link(settings, c.get("clip_id", "")),
                      problem])
-    io.write_all(T.SCHEDULE, rows)
+    _write_tab(io, T.SCHEDULE, rows)
 
 
 def apply_posted_edits(io):
@@ -702,7 +709,8 @@ def sync(io, settings):
     read_settings(io, settings)
     vi = sync_video_input(io, settings)
     edits = apply_ready_edits(io, settings)
-    edits.setdefault("done", {})["back"] = apply_skipped_edits(io, settings)
+    apply_schedule_edits(io, settings, edits.setdefault("notes", {}), edits.setdefault("done", {}))
+    edits["done"]["back"] = apply_skipped_edits(io, settings)
     urls = apply_posted_edits(io)
     q = queue.step(settings)
     n_ready = write_ready(io, settings, edits.get("notes", {}))

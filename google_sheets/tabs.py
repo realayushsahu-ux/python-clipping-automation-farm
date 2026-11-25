@@ -21,7 +21,7 @@ GUIDE = "START HERE"
 ORDER = [GUIDE, VIDEO_INPUT, SCHEDULE, READY, SKIPPED, POSTED, PERFORMANCE, SETTINGS, PROCESSING, FAILED, TRENDS,
          AUDIT]
 GREEN, BLUE, GREY, ORANGE = (0.20, 0.66, 0.33), (0.26, 0.52, 0.96), (0.62, 0.62, 0.62), (1.0, 0.6, 0.0)
-TAB_COLORS = {GUIDE: ORANGE, VIDEO_INPUT: GREEN, READY: GREEN, SKIPPED: GREEN, SETTINGS: GREEN, SCHEDULE: BLUE, POSTED: BLUE,
+TAB_COLORS = {GUIDE: ORANGE, VIDEO_INPUT: GREEN, READY: GREEN, SKIPPED: GREEN, SETTINGS: GREEN, SCHEDULE: GREEN, POSTED: BLUE,
               PERFORMANCE: BLUE, PROCESSING: GREY, FAILED: GREY, TRENDS: GREY, AUDIT: GREY}
 
 TABS = {
@@ -68,9 +68,12 @@ TABS = {
         "typed": [4],
     },
     SCHEDULE: {
-        # one row per clip, next post first (view only: change times in Ready to Post)
-        "headers": ["Post Time", "Day", "Clip ID", "YouTube Title", "Where", "Status", "Watch", "Problem"],
-        "widths": [130, 110, 90, 340, 160, 170, 130, 320],
+        # one row per clip, next post first. Action: skip / post next / post last / move up / move down
+        # (same as Ready to Post; the farm acts within a minute and clears the cell)
+        "headers": ["Post Time", "Day", "Clip ID", "Action", "YouTube Title", "Where", "Status", "Watch", "Problem"],
+        "widths": [130, 110, 90, 100, 340, 160, 170, 130, 320],
+        "dropdowns": {4: ["skip", "post next", "post last", "move up", "move down"]},
+        "typed": [4],
     },
     POSTED: {
         # Post URL: paste the link here for clips you posted by hand
