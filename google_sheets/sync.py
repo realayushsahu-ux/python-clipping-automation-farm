@@ -217,6 +217,35 @@ def _int(s):
 
 
 # ------------------------------------------------------------------------------ Ready to Post
+ACTIONS = ("skip", "post next", "post last", "move up", "move down")
+
+
+def _apply_actions(rows, settings, notes, done):
+    """Action column (Ready to Post or Posting Schedule): skip / post next / post last / move up / move down."""
+    h = _header_map(rows)
+    for row in rows[1:]:
+        cid = _cell(row, h, "Clip ID").upper()
+        act = _cell(row, h, "Action").lower()
+        if not cid or act not in ACTIONS:
+            continue
+        try:
+            queue.reorder(settings, cid, act)
+            done["skipped" if act == "skip" else "moved"] = done.get("skipped" if act == "skip" else "moved", 0) + 1
+            log.info(f"{cid}: {act} (from the Sheet)")
+        except ValueError as exc:
+            notes[cid] = f"{act}: {exc}"
+
+
+def _write_tab(io, tab, rows):
+    """Write a farm tab; when an update changed its columns, its dropdowns / colours are set again."""
+    old = io.read(tab)[:1]
+    io.write_all(tab, rows)
+    if old and old[0][:len(rows[0])] != rows[0]:
+        spec = T.TABS[tab]
+        io.format_tab(tab, spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
+        io.arrange(T.ORDER, T.TAB_COLORS)
+
+
 def apply_ready_edits(io, settings):
     """Approve yes/no/remake and Post Time edits typed in the Ready to Post tab."""
     db = get_db()
@@ -226,16 +255,7 @@ def apply_ready_edits(io, settings):
     h = _header_map(rows)
     done = {"approved": 0, "rejected": 0, "remake": 0, "time": 0, "posted": 0, "skipped": 0, "moved": 0}
     notes = {}
-    for row in rows[1:]:                             # Action first, in row order (the farm clears it after)
-        cid = _cell(row, h, "Clip ID").upper()
-        act = _cell(row, h, "Action").lower()
-        if not cid or act not in ("skip", "post next", "post last", "move up", "move down"):
-            continue
-        try:
-            queue.reorder(settings, cid, act)
-            done["skipped" if act == "skip" else "moved"] += 1
-        except ValueError as exc:
-            notes[cid] = f"{act}: {exc}"
+    _apply_actions(rows, settings, notes, done)      # Action first, in row order (the farm clears it after)
     for row in rows[1:]:
         cid = _cell(row, h, "Clip ID").upper()
         c = db.get_clip(cid) if cid else None
@@ -332,11 +352,7 @@ def write_ready(io, settings, notes):
                      p.get("pin_comment", ""), c.get("hook") or "",
                      ",".join(p.get("platforms") or settings.get("default_platforms") or []), _num(c.get("score")),
                      c.get("kind") or "", c.get("creator") or p.get("creator") or "", c["video_id"]])
-    old = io.read(T.READY)[:1]
-    io.write_all(T.READY, rows)
-    if old and old[0][:len(rows[0])] != rows[0]:     # columns changed by an update (Action, 2026-11-24)
-        spec = T.TABS[T.READY]
-        io.format_tab(T.READY, spec.get("widths"), spec.get("dropdowns"), spec.get("typed"))
+    _write_tab(io, T.READY, rows)
     return len(rows) - 1
 
 
