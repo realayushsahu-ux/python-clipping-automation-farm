@@ -57,7 +57,9 @@ def reschedule_missed(settings) -> dict:
     tz = _tz(settings)
     grace = timedelta(minutes=int(settings.get("missed_post_grace_minutes", 15)))
     cutoff = (datetime.now(tz) - grace).strftime(FMT)
-    posted = {p["clip_id"] for p in db.posts("posted", "publishing")}
+    # a clip whose post was already TRIED (posted / posting / failed and retrying / needs you) keeps its time:
+    # its posts carry their own retry time (found 2026-11-26: CLIP0074 showed 29 Nov but went out on the 26th)
+    posted = {p["clip_id"] for p in db.posts("posted", "publishing", "failed", "needs_manual")}
     late = [c["clip_id"] for c in db.clips(None, "ready", "approved")
             if c.get("post_time") and c["post_time"] < cutoff and c["clip_id"] not in posted]
     if not late:
