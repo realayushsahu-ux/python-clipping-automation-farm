@@ -16,7 +16,7 @@ from pathlib import Path
 from core.db import get_db, now
 from core.logger import get_logger
 from posting import queue
-from posting.errors import Ambiguous, Permanent, Retryable
+from posting.errors import Ambiguous, LoginNeeded, Permanent, Retryable
 
 log = get_logger("publisher")
 
@@ -178,6 +178,13 @@ def publish_one(post_id, settings) -> str:
         db.event("warning", c["clip_id"], "publish", f"{p['platform']}: {exc} (next try {nxt[11:16]})")
         _clip_back(c["clip_id"])
         return "failed"
+    except LoginNeeded as exc:
+        # the login, not the clip: wait (this try does not count) and look again in 30 min
+        nxt = (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds")
+        db.update_post(post_id, status="failed", attempts=max(0, attempts - 1), last_error=str(exc)[:900],
+                       next_try=nxt)
+        _clip_back(c["clip_id"])
+        return "waiting_login"
     except Ambiguous as exc:
         return _manual(p, f"MAYBE POSTED - check the channel, then type posted or retry: {exc}")
     except Exception as exc:  # noqa: BLE001 - Permanent and anything unexpected
@@ -270,10 +277,42 @@ def publish_due(settings) -> dict:
     _first_round = False
     if queue.reschedule_missed(settings):         # late clips → next free time, before anything is posted
         queue.plan_posts(settings)
+    _heal_login_waits()
+    last = _last_posted()
+    gap = timedelta(minutes=int(settings.get("catch_up_gap_minutes", 20)))
+    late = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
     for p in sorted(due_posts(settings), key=lambda x: x.get("scheduled_at") or ""):
+        # catch-up (a post 2+ hours late, e.g. after the login came back): one at a time per platform,
+        # catch_up_gap_minutes apart, so 8 waiting Shorts don't all land on the channel in the same minute
+        if (p.get("scheduled_at") or "") < late and datetime.now() - last.get(p["platform"], datetime.min) < gap:
+            continue
         st = publish_one(p["id"], settings)
         rep[st] = rep.get(st, 0) + 1
+        if st == "posted":
+            last[p["platform"]] = datetime.now()
     return rep
+
+
+def _last_posted() -> dict:
+    out = {}
+    for p in get_db().posts("posted"):
+        try:
+            t = datetime.fromisoformat((p.get("posted_at") or "")[:19])
+        except ValueError:
+            continue
+        out[p["platform"]] = max(out.get(p["platform"], datetime.min), t)
+    return out
+
+
+def _heal_login_waits():
+    """Posts that went to "needs you" only because a login had expired (before LoginNeeded existed, or by
+    an older message) wait for the login instead: they go out by themselves once you sign in again."""
+    db = get_db()
+    for p in db.posts("needs_manual"):
+        err = (p.get("last_error") or "").lower()
+        if "not connected" in err or "login expired" in err or "expired or revoked" in err:
+            db.update_post(p["id"], status="failed", next_try=now(), attempts=0,
+                           last_error="waiting for the YouTube login (double-click 'Reconnect YouTube' on the Desktop)")
 
 
 def retry_clip(cid) -> int:

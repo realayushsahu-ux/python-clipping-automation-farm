@@ -23,3 +23,8 @@ class Permanent(PostError):
 
 class Ambiguous(PostError):
     pass
+
+
+class LoginNeeded(Permanent):
+    """The platform login expired / was removed. Nothing is wrong with the clip: the post WAITS (it is not
+    a "needs you" per clip) and goes out by itself once you sign in again (Desktop: Reconnect YouTube)."""

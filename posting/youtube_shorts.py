@@ -45,7 +45,9 @@ def credentials(interactive=False):
     if creds and creds.valid:
         return creds
     if not interactive:
-        raise Permanent("YouTube is not connected (or access was removed): run  main.py auth youtube")
+        from posting.errors import LoginNeeded
+        raise LoginNeeded("YouTube login expired: double-click 'Reconnect YouTube' on the Desktop "
+                          "(or run  main.py auth reconnect)")
     from google_auth_oauthlib.flow import InstalledAppFlow
     secret = _path("YOUTUBE_CLIENT_SECRET_FILE", "secrets/client_secret.json")
     if not secret.exists():
