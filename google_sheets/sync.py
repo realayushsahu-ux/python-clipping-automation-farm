@@ -420,6 +420,17 @@ def write_processing(io):
     io.write_all(T.PROCESSING, rows)
 
 
+def _login_fixed_since(posts) -> bool:
+    """True when the YouTube login was saved again after these posts last failed on it."""
+    try:
+        from posting.youtube_shorts import _path
+        saved = datetime.fromtimestamp(_path("YOUTUBE_TOKEN_FILE", "secrets/youtube_token.json").stat().st_mtime)
+        tried = max(datetime.fromisoformat(p["claimed_at"]) for p in posts if p.get("claimed_at"))
+        return saved > tried
+    except (OSError, ValueError, TypeError, ImportError):
+        return False
+
+
 def _day(ts):
     """'2026-11-20 20:00' -> 'Today 8:00 PM' / 'Tomorrow 10:00 AM' / 'Sat 22 Nov 6:00 PM'."""
     try:
@@ -455,7 +466,14 @@ def schedule_items(settings):
         problem = " | ".join(f"{p['platform']}: {(p.get('last_error') or '')[:150]}"
                              for p in ps if p["status"] in ("failed", "needs_manual") and p.get("last_error"))
         status = names[worst["status"]]
-        if worst["status"] == "failed" and worst.get("next_try"):
+        login_waits = [p for p in ps if p["status"] == "failed"
+                       and "youtube login" in (p.get("last_error") or "").lower()]
+        if login_waits and _login_fixed_since(login_waits):
+            status = "⏳ late, posting soon (late clips go 20 min apart)"
+            problem = ""
+        elif login_waits:
+            status = "🔑 waiting for YouTube login (Desktop: Reconnect YouTube)"
+        elif worst["status"] == "failed" and worst.get("next_try"):
             status = f"🔁 trying again at {_day(worst['next_try'][:16].replace('T', ' '))}"
         items.append((min(_due(p) for p in ps), c, sorted(p["platform"] for p in ps), status, problem))
     for c in db.clips(None, "ready"):
