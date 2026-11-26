@@ -167,7 +167,7 @@ def main():
     m.add_argument("--url", default="", help="link of the post")
     sub.add_parser("serve", help="Folder-link server for the Google Sheet (Ctrl+C to stop)")
     au = sub.add_parser("auth", help="connect / check YouTube or Instagram")
-    au.add_argument("platform", choices=["youtube", "instagram", "youtube-analytics"])
+    au.add_argument("platform", choices=["youtube", "instagram", "youtube-analytics", "reconnect"])
     sp = sub.add_parser("stats", help="views of every Short/Reel, winners, learn from them (Phase 8)")
     sp.add_argument("--top", type=int, default=15)
     sp.add_argument("--relearn", action="store_true", help="write config/winners.md again even if nothing changed")
@@ -618,6 +618,14 @@ def cmd_posted(a):
 
 def cmd_auth(a):
     ensure_dirs()
+    if a.platform == "reconnect":           # Desktop shortcut "Reconnect YouTube": both YouTube logins again
+        ok = True
+        for name in ("youtube", "youtube-analytics"):
+            print(f"\n=== {name} ===")
+            ok = cmd_auth(type("A", (), {"platform": name})()) == 0 and ok
+        print("\nDone. Waiting YouTube posts go out by themselves within a few minutes." if ok
+              else "\nSomething did not connect; see the message above.")
+        return 0 if ok else 1
     try:
         if a.platform == "youtube-analytics":
             from growth.channel_audit import analytics_credentials

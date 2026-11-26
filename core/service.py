@@ -543,15 +543,16 @@ def make_shortcuts() -> list:
     py = py if py.exists() else Path(sys.executable)
     made = []
     places = ("[Environment]::GetFolderPath('Desktop')", "'" + str(ROOT).replace("'", "''") + "'")
-    for name, cmd, where in [(n, c, w) for n, c in (("Start Clipping Farm", "start"), ("Stop Clipping Farm", "stop"))
-                             for w in places]:
-        args = f'/c ""{py}" "{ROOT / "main.py"}" {cmd} & timeout /t 8"'
+    jobs = (("Start Clipping Farm", "start"), ("Stop Clipping Farm", "stop"), ("Reconnect YouTube", "auth reconnect"))
+    for name, cmd, where in [(n, c, w) for n, c in jobs for w in places]:
+        wait = "pause" if cmd.startswith("auth") else "timeout /t 8"      # read what it says before it closes
+        args = f'/c ""{py}" "{ROOT / "main.py"}" {cmd} & {wait}"'
         ps = (f"$d={where};"
               "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d '" + name + ".lnk'));"
               "$s.TargetPath=\"$env:ComSpec\";"
               "$s.Arguments='" + args.replace("'", "''") + "';"
               "$s.WorkingDirectory='" + str(ROOT).replace("'", "''") + "';"
-              "$s.IconLocation=\"$env:SystemRoot\\System32\\shell32.dll," + ("137" if cmd == "start" else "131") + "\";"
+              "$s.IconLocation=\"$env:SystemRoot\\System32\\shell32.dll," + {"start": "137", "stop": "131"}.get(cmd, "238") + "\";"
               "$s.Save()")
         r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
         if r.returncode != 0:
