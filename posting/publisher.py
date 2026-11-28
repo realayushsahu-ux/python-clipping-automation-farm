@@ -321,6 +321,9 @@ def _heal_login_waits():
         if "not connected" in err or "login expired" in err or "expired or revoked" in err:
             db.update_post(p["id"], status="failed", next_try=now(), attempts=0,
                            last_error="waiting for the YouTube login (double-click 'Reconnect YouTube' on the Desktop)")
+        elif "uploadlimitexceeded" in err or "quotaexceeded" in err:      # a daily limit: just try again later
+            db.update_post(p["id"], status="failed", next_try=now(), attempts=0,
+                           last_error="YouTube daily upload limit: tries again later")
 
 
 def retry_clip(cid) -> int:
