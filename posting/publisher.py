@@ -168,6 +168,14 @@ def publish_one(post_id, settings) -> str:
             db.event("warning", c["clip_id"], "publish", f"{p['platform']}: no internet, next try {nxt[11:16]}")
             _clip_back(c["clip_id"])
             return "failed"
+        if "daily limit" in str(exc):
+            # YouTube's upload cap per day: nothing is wrong with the clip; wait, this try does not count
+            nxt = (datetime.now() + timedelta(hours=3)).isoformat(timespec="seconds")
+            db.update_post(post_id, status="failed", attempts=max(0, attempts - 1), last_error=str(exc)[:900],
+                           next_try=nxt)
+            db.event("warning", c["clip_id"], "publish", f"{p['platform']}: daily upload limit, next try {nxt[11:16]}")
+            _clip_back(c["clip_id"])
+            return "failed"
         most = int(settings.get("posting_max_attempts", 3))
         if "still processing" in str(exc) or "network error" in str(exc):
             most *= 2                   # Instagram's slow side or an internet blink: nothing is wrong with the clip
