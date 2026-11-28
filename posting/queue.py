@@ -164,6 +164,7 @@ def step(settings) -> dict:
     if approved:
         assign_post_times(settings)
     moved = reschedule_missed(settings)
+    moved.update(retime_on_new_slots(settings))
     plan = plan_posts(settings)
     retry_moves()
     return {"auto_approved": len(approved), "rescheduled": len(moved), **plan}
@@ -219,6 +220,40 @@ def reorder(settings, cid, how) -> dict:
     q.insert(pos, c)
     db.event("info", cid, "order", f"{how} in Google Sheets")
     return _apply_order(settings, q, slots)
+
+
+def _slots_file():
+    from core.paths import DATA_DIR
+    return DATA_DIR / "posting_times_applied.json"
+
+
+def retime_on_new_slots(settings, force=False) -> dict:
+    """You changed posting_times / posts_per_day (Settings tab) → every clip waiting in the queue moves onto
+    the NEW times, same order, earliest first. Only runs when those settings change (or force), so a time
+    you typed for one clip is not undone on every round. Returns {clip_id: new time}."""
+    from posting.slots import _slot_times, next_free_slots
+    sig = {"times": _slot_times(settings), "tz": str(settings.get("timezone") or "")}
+    f = _slots_file()
+    try:
+        old = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        old = None
+    if old == sig and not force:
+        return {}
+    db = get_db()
+    q = _queue(settings)
+    ids = {c["clip_id"] for c in q}
+    keep = {c["post_time"] for c in db.clips() if c.get("post_time") and c["clip_id"] not in ids
+            and c["status"] in ("approved", "scheduled", "posting")}
+    moved = {}
+    if q and old is not None or force:              # first run ever: just remember the times
+        slots = next_free_slots(settings, len(q), set(keep))
+        moved = _apply_order(settings, q, slots)
+        if moved:
+            db.event("info", None, "retime", f"new posting times {sig['times']}: {len(moved)} clips moved")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(sig), encoding="utf-8")
+    return moved
 
 
 def unskip(settings, cid) -> str:
